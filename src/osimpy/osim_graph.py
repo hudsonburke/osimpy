@@ -18,59 +18,77 @@ class OsimGraph(BaseModel):
     osim_model: osim.Model
 
     joint_bodies: dict[str, tuple[str, str]] = Field(
-        default_factory=dict
-    )  # Joint name -> (parent name, child name)
+        default_factory=dict,
+        description="Joint name -> (parent name, child name)"
+    )
     bodies_joint: dict[frozenset[str], str] = Field(
-        default_factory=dict
-    )  # (parent name, child name) -> Joint name
+        default_factory=dict,
+        description="(parent name, child name) -> Joint name"
+    )
     body_graph: dict[str, set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Adjacent body names
+        default_factory=lambda: defaultdict(set),
+        description="Adjacent body names"
+    )
     muscle_attachments: dict[str, list[str]] = Field(
-        default_factory=lambda: defaultdict(list)
-    )  # Muscle name -> body names (essentially an ordered set)
+        default_factory=lambda: defaultdict(list),
+        description="Muscle name -> body names (essentially an ordered set)"
+    )
     muscle_wraps: dict[str, list[str]] = Field(
-        default_factory=lambda: defaultdict(list)
-    )  # Muscle name -> wrap object names (essentially an ordered set)
+        default_factory=lambda: defaultdict(list),
+        description="Muscle name -> wrap object names (essentially an ordered set)"
+    )
     wraps_muscles: dict[str, set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Wrap object name -> muscle names
+        default_factory=lambda: defaultdict(set),
+        description="Wrap object name -> muscle names"
+    )
     body_wraps: dict[str, set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Body name -> wrap object names
+        default_factory=lambda: defaultdict(set),
+        description="Body name -> wrap object names"
+    )
     wrap_body: dict[str, str] = Field(
-        default_factory=dict
-    )  # Wrap object name -> body name
+        default_factory=dict,
+        description="Wrap object name -> body name"
+    )
     path_cache: dict[frozenset[str], list[str]] = Field(
-        default_factory=dict
-    )  # Cached paths between body names
+        default_factory=dict,
+        description="Cached paths between body names"
+    )
     muscle_crossings: dict[str, set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Muscle name -> crossed joint names
+        default_factory=lambda: defaultdict(set),
+        description="Muscle name -> crossed joint names"
+    )
     crossings_muscle: dict[frozenset[str], set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Joint names -> muscle names
+        default_factory=lambda: defaultdict(set),
+        description="Joint names -> muscle names"
+    )
     muscle_coords: dict[str, set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Muscle name -> coordinate names
+        default_factory=lambda: defaultdict(set),
+        description="Muscle name -> coordinate names"
+    )
     coords_muscles: dict[frozenset[str], set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Coordinate names -> muscle names
+        default_factory=lambda: defaultdict(set),
+        description="Coordinate names -> muscle names"
+    )
     body_markers: dict[str, set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Body name -> marker names
+        default_factory=lambda: defaultdict(set),
+        description="Body name -> marker names"
+    )
     markers: dict[str, osim.Marker] = Field(
-        default_factory=dict
-    )  # Marker name -> marker object
+        default_factory=dict,
+        description="Marker name -> marker object"
+    )
     marker_bodies: dict[str, str] = Field(
-        default_factory=dict
-    )  # Marker name -> body name
+        default_factory=dict,
+        description="Marker name -> body name"
+    )
     joint_coords: dict[str, set[str]] = Field(
-        default_factory=lambda: defaultdict(set)
-    )  # Joint name -> coordinate names
+        default_factory=lambda: defaultdict(set),
+        description="Joint name -> coordinate names"
+    )
     coord_ranges: dict[str, tuple[float, float]] = Field(
-        default_factory=dict
-    )  # Coordinate name -> (min, max) range
+        default_factory=dict,
+        description="Coordinate name -> (min, max) range"
+    )
 
     @model_validator(mode="after")
     def build_graph(self):
