@@ -24,8 +24,10 @@ from .tools import (
     CMCResult,
     ScaleResult,
 )
+from .osim_graph import OsimGraph
 
 __all__ = [
+    "OsimGraph",
     "export_trc",
     "export_mot",
     "export_external_loads",
