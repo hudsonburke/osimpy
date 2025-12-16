@@ -148,8 +148,10 @@ class OsimGraph(BaseModel):
     coord_ranges: dict[str, tuple[float, float]] = Field(
         default_factory=dict, description="Coordinate name -> (min, max) range"
     )
-    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] = Field(default="ERROR", description="Logging level for the graph operations")
-    
+    log_level: Literal[
+        "TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"
+    ] = Field(default="ERROR", description="Logging level for the graph operations")
+
     @model_validator(mode="after")
     def build_graph(self):
         """Build all graph structures after model initialization."""
@@ -684,317 +686,6 @@ class OsimGraph(BaseModel):
             "num_wraps": len(self.wrap_body),
         }
 
-    def to_networkx(self, graph_type: str = "body") -> "networkx.Graph":
-        """
-        Convert the graph to a NetworkX graph for visualization and analysis.
-
-        Args:
-            graph_type: Type of graph to create. Options:
-                - "body": Body connectivity graph (undirected)
-                - "muscle": Muscle-body attachment graph (bipartite)
-                - "coordinate": Coordinate-muscle actuation graph (bipartite)
-
-        Returns:
-            NetworkX Graph object with nodes and edges representing the structure
-
-        Raises:
-            ImportError: If networkx is not installed
-            ValueError: If graph_type is not recognized
-
-        Example:
-            >>> import matplotlib.pyplot as plt
-            >>> G = graph.to_networkx("body")
-            >>> nx.draw(G, with_labels=True)
-            >>> plt.show()
-
-        Note:
-            Requires networkx to be installed: pip install networkx
-        """
-        try:
-            import networkx as nx
-        except ImportError:
-            raise ImportError(
-                "NetworkX is required for graph visualization. "
-                "Install it with: pip install networkx"
-            )
-
-        if graph_type == "body":
-            return self._body_graph_to_networkx(nx)
-        elif graph_type == "muscle":
-            return self._muscle_graph_to_networkx(nx)
-        elif graph_type == "coordinate":
-            return self._coordinate_graph_to_networkx(nx)
-        else:
-            raise ValueError(
-                f"Unknown graph_type '{graph_type}'. "
-                "Must be one of: 'body', 'muscle', 'coordinate'"
-            )
-
-    def _body_graph_to_networkx(self, nx) -> "networkx.Graph":
-        """
-        Create NetworkX graph of body connectivity.
-
-        Nodes: Body names
-        Edges: Joints connecting bodies
-        Node attributes: None
-        Edge attributes: joint_name, coordinates, dof
-        """
-        G = nx.Graph()
-
-        # Add all bodies as nodes
-        for body_name in self.body_graph.keys():
-            G.add_node(body_name, node_type="body")
-
-        # Add joints as edges
-        for joint_name, (parent, child) in self.joint_bodies.items():
-            coords = list(self.joint_coords.get(joint_name, set()))
-            G.add_edge(
-                parent,
-                child,
-                joint_name=joint_name,
-                coordinates=coords,
-                dof=len(coords),
-            )
-
-        logger.debug(
-            f"Created body graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges"
-        )
-        return G
-
-    def _muscle_graph_to_networkx(self, nx) -> "networkx.Graph":
-        """
-        Create NetworkX bipartite graph of muscle-body relationships.
-
-        Nodes: Muscle names and body names
-        Edges: Muscle attachments to bodies
-        Node attributes: node_type ("muscle" or "body")
-        Edge attributes: attachment_order (0-indexed position in path)
-        """
-        G = nx.Graph()
-
-        # Add muscle nodes
-        for muscle_name in self.muscle_attachments.keys():
-            G.add_node(muscle_name, node_type="muscle", bipartite=0)
-
-        # Add body nodes
-        for body_name in self.body_graph.keys():
-            G.add_node(body_name, node_type="body", bipartite=1)
-
-        # Add edges for muscle attachments
-        for muscle_name, body_names in self.muscle_attachments.items():
-            for i, body_name in enumerate(body_names):
-                G.add_edge(
-                    muscle_name,
-                    body_name,
-                    attachment_order=i,
-                    is_origin=(i == 0),
-                    is_insertion=(i == len(body_names) - 1),
-                )
-
-        logger.debug(
-            f"Created muscle-body bipartite graph: "
-            f"{G.number_of_nodes()} nodes, {G.number_of_edges()} edges"
-        )
-        return G
-
-    def _coordinate_graph_to_networkx(self, nx) -> "networkx.Graph":
-        """
-        Create NetworkX bipartite graph of coordinate-muscle relationships.
-
-        Nodes: Coordinate names and muscle names
-        Edges: Muscles that actuate coordinates
-        Node attributes: node_type ("coordinate" or "muscle"),
-                        range (for coordinates)
-        Edge attributes: None
-        """
-        G = nx.Graph()
-
-        # Add coordinate nodes
-        for coord_name, (min_val, max_val) in self.coord_ranges.items():
-            G.add_node(
-                coord_name,
-                node_type="coordinate",
-                bipartite=0,
-                range_min=min_val,
-                range_max=max_val,
-                range_span=max_val - min_val,
-            )
-
-        # Add muscle nodes
-        for muscle_name in self.muscle_coords.keys():
-            G.add_node(muscle_name, node_type="muscle", bipartite=1)
-
-        # Add edges for muscle-coordinate actuation
-        for muscle_name, coords in self.muscle_coords.items():
-            for coord_name in coords:
-                G.add_edge(muscle_name, coord_name)
-
-        logger.debug(
-            f"Created coordinate-muscle bipartite graph: "
-            f"{G.number_of_nodes()} nodes, {G.number_of_edges()} edges"
-        )
-        return G
-
-    def draw_graph(
-        self,
-        graph_type: str = "body",
-        layout: str = "spring",
-        figsize: tuple[int, int] = (12, 8),
-        save_path: str | None = None,
-        **kwargs,
-    ) -> None:
-        """
-        Visualize the graph using matplotlib.
-
-        Args:
-            graph_type: Type of graph to draw ("body", "muscle", "coordinate")
-            layout: NetworkX layout algorithm to use:
-                - "spring": Force-directed layout (default)
-                - "circular": Circular layout
-                - "kamada_kawai": Kamada-Kawai layout
-                - "planar": Planar layout (if graph is planar)
-                - "shell": Shell layout
-            figsize: Figure size as (width, height)
-            save_path: Optional path to save the figure
-            **kwargs: Additional arguments passed to nx.draw()
-
-        Raises:
-            ImportError: If networkx or matplotlib is not installed
-
-        Example:
-            >>> # Draw body connectivity graph
-            >>> graph.draw_graph("body", layout="kamada_kawai")
-            >>>
-            >>> # Draw muscle attachments with custom colors
-            >>> graph.draw_graph(
-            ...     "muscle",
-            ...     node_color="lightblue",
-            ...     save_path="muscle_graph.png"
-            ... )
-        """
-        try:
-            import networkx as nx
-            import matplotlib.pyplot as plt
-        except ImportError as e:
-            raise ImportError(
-                "NetworkX and matplotlib are required for visualization. "
-                "Install with: pip install networkx matplotlib"
-            ) from e
-
-        # Get the graph
-        G = self.to_networkx(graph_type)
-
-        # Choose layout
-        layout_funcs = {
-            "spring": nx.spring_layout,
-            "circular": nx.circular_layout,
-            "kamada_kawai": nx.kamada_kawai_layout,
-            "planar": nx.planar_layout,
-            "shell": nx.shell_layout,
-        }
-
-        if layout not in layout_funcs:
-            raise ValueError(
-                f"Unknown layout '{layout}'. "
-                f"Must be one of: {', '.join(layout_funcs.keys())}"
-            )
-
-        # Compute positions
-        pos = layout_funcs[layout](G)
-
-        # Create figure
-        plt.figure(figsize=figsize)
-
-        # Set default drawing parameters based on graph type
-        draw_params = {
-            "with_labels": True,
-            "node_size": 500,
-            "font_size": 8,
-            "font_weight": "bold",
-            "edge_color": "gray",
-            "alpha": 0.8,
-        }
-
-        # Graph-type specific styling
-        if graph_type == "muscle":
-            # Color nodes by type in bipartite graph
-            muscle_nodes = [
-                n for n, d in G.nodes(data=True) if d.get("node_type") == "muscle"
-            ]
-            body_nodes = [
-                n for n, d in G.nodes(data=True) if d.get("node_type") == "body"
-            ]
-
-            nx.draw_networkx_nodes(
-                G,
-                pos,
-                nodelist=muscle_nodes,
-                node_color="salmon",
-                node_size=300,
-                label="Muscles",
-                alpha=0.8,
-            )
-            nx.draw_networkx_nodes(
-                G,
-                pos,
-                nodelist=body_nodes,
-                node_color="lightblue",
-                node_size=500,
-                label="Bodies",
-                alpha=0.8,
-            )
-            nx.draw_networkx_edges(G, pos, edge_color="gray", alpha=0.5)
-            nx.draw_networkx_labels(G, pos, font_size=6)
-            plt.legend()
-
-        elif graph_type == "coordinate":
-            # Color nodes by type in bipartite graph
-            coord_nodes = [
-                n for n, d in G.nodes(data=True) if d.get("node_type") == "coordinate"
-            ]
-            muscle_nodes = [
-                n for n, d in G.nodes(data=True) if d.get("node_type") == "muscle"
-            ]
-
-            nx.draw_networkx_nodes(
-                G,
-                pos,
-                nodelist=coord_nodes,
-                node_color="lightgreen",
-                node_size=500,
-                label="Coordinates",
-                alpha=0.8,
-            )
-            nx.draw_networkx_nodes(
-                G,
-                pos,
-                nodelist=muscle_nodes,
-                node_color="salmon",
-                node_size=300,
-                label="Muscles",
-                alpha=0.8,
-            )
-            nx.draw_networkx_edges(G, pos, edge_color="gray", alpha=0.5)
-            nx.draw_networkx_labels(G, pos, font_size=6)
-            plt.legend()
-
-        else:
-            # Body graph - use default parameters with any user overrides
-            draw_params.update(kwargs)
-            nx.draw(G, pos, **draw_params)
-
-        plt.title(
-            f"{graph_type.capitalize()} Graph - {G.number_of_nodes()} nodes, "
-            f"{G.number_of_edges()} edges"
-        )
-        plt.tight_layout()
-
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches="tight")
-            logger.info(f"Graph saved to {save_path}")
-
-        plt.show()
-
     def clear_caches(self):
         """
         Clear all cached data structures.
@@ -1074,7 +765,9 @@ class OsimGraph(BaseModel):
         Note:
             You must call model.realizePosition(state) before calling this method.
         """
-        return np.array([self.get_muscle_length(name, state) for name in muscle_names])
+        # Cache muscle objects to avoid repeated lookups
+        muscle_objs = [self.get_muscle(name) for name in muscle_names]
+        return np.array([muscle.getLength(state) for muscle in muscle_objs])
 
     def get_muscle_lengths_coordinates(
         self,
@@ -1112,20 +805,20 @@ class OsimGraph(BaseModel):
         if state is None:
             state = self.osim_model.initSystem()
 
+        # Cache coordinate and muscle objects to avoid repeated lookups
+        coord_objs = [self.get_coordinate(coord) for coord in coordinates]
+        muscle_objs = [self.get_muscle(name) for name in muscle_names]
+
         data = np.zeros(
             (coordinate_values.shape[0], len(coordinates) + len(muscle_names))
         )
         data[:, : len(coordinates)] = coordinate_values
         for i, values in enumerate(coordinate_values):
-            for coord, value in zip(coordinates, values):
-                self.get_coordinate(coord).setValue(state, value)
+            for coord_obj, value in zip(coord_objs, values):
+                coord_obj.setValue(state, value)
             self.osim_model.realizePosition(state)
-            data[i, len(coordinates) :] = np.array(
-                [
-                    self.get_muscle(muscle_name).getLength(state)
-                    for muscle_name in muscle_names
-                ]
-            )
+            for j, muscle_obj in enumerate(muscle_objs):
+                data[i, len(coordinates) + j] = muscle_obj.getLength(state)
         return data
 
     def get_muscle_lengths_rom(
@@ -1183,6 +876,9 @@ class OsimGraph(BaseModel):
             >>> print(soleus_df.head())
         """
         # TODO: Subsets and/or parallelization to speed up computation
+        # Create state once and reuse it for all muscle length calculations
+        state = self.osim_model.initSystem()
+        
         results = {}
         for coord_set, muscles in self.coords_muscles.items():
             # check for locked coordinates
@@ -1198,7 +894,9 @@ class OsimGraph(BaseModel):
             diff = coord_set.difference(unlocked_coords)
             if diff:
                 logger.warning(f"Locked coordinates {diff} for muscles {muscles}")
-            df = self.get_muscle_lengths_rom(list(muscles), min_points=min_points)
+            df = self.get_muscle_lengths_rom(
+                list(muscles), min_points=min_points, state=state
+            )
             # Add the coordinate values and muscle lengths to the results dictionary for each muscle
             results.update(
                 {muscle: df[list(unlocked_coords) + [muscle]] for muscle in muscles}
@@ -1227,15 +925,15 @@ class OsimGraph(BaseModel):
         if state is None:
             state = self.osim_model.initSystem()
 
+        # Cache coordinate and muscle objects to avoid repeated lookups
+        coord_objs = [self.get_coordinate(coord) for coord in data.columns]
+        muscle_objs = [self.get_muscle(name) for name in muscle_names]
+
         lengths = np.zeros((data.shape[0], len(muscle_names)))
         for i, row in enumerate(data.to_numpy()):
-            for coord, value in zip(data.columns, row):
-                self.get_coordinate(coord).setValue(state, value)
+            for coord_obj, value in zip(coord_objs, row):
+                coord_obj.setValue(state, value)
             self.osim_model.realizePosition(state)
-            lengths[i] = np.array(
-                [
-                    self.get_muscle(muscle_name).getLength(state)
-                    for muscle_name in muscle_names
-                ]
-            )
+            for j, muscle_obj in enumerate(muscle_objs):
+                lengths[i, j] = muscle_obj.getLength(state)
         return pl.DataFrame(lengths, schema=muscle_names)
