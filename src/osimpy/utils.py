@@ -1,6 +1,7 @@
 import opensim as osim
 import os
 from pathlib import Path
+from loguru import logger
 
 
 def parse_enf_file(file_path: str, encoding: str = "utf-8") -> dict[str, str]:
@@ -220,9 +221,6 @@ def get_forceplate_body_mapping_from_enf(
     This function reads forceplate assignments from a Vicon ENF file (e.g., FP3=Right)
     and maps them to OpenSim body names using the provided body_mapping dict.
 
-    This is a standalone utility that doesn't depend on Trial instance data,
-    making it flexible for use with different data sources or contact detection methods.
-
     Args:
         enf_path: Path to the .enf file
         body_mapping: Dictionary mapping ENF context names (e.g., 'Left', 'Right')
@@ -239,8 +237,6 @@ def get_forceplate_body_mapping_from_enf(
         ... )
         >>> # If ENF contains FP3=Right, returns {3: 'foot_r'}
     """
-    from loguru import logger
-    from ..ingest import parse_enf_file
 
     # Parse ENF file
     enf_data = parse_enf_file(enf_path)

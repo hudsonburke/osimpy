@@ -1,4 +1,5 @@
 """Result classes for OpenSim tool executions."""
+
 import json
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ class ToolResult(BaseModel):
     Stores metadata about the tool execution and paths to output files.
     Results are lightweight - actual data loading is deferred.
     """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     success: bool = Field(description="Whether the tool completed successfully")
@@ -24,15 +26,14 @@ class ToolResult(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Warning messages")
     errors: list[str] = Field(default_factory=list, description="Error messages")
     settings_dict: dict[str, Any] | None = Field(
-        None,
-        description="Settings used to generate this result"
+        None, description="Settings used to generate this result"
     )
-    
+
     @property
     def output_dir(self) -> Path:
         """Get results directory as Path object."""
         return Path(self.results_directory)
-    
+
     def get_output_file(self, filename: str) -> Path:
         """Get full path to an output file.
 
@@ -83,18 +84,10 @@ class ToolResult(BaseModel):
         # Add tool-specific outputs
         provenance["outputs"].update(self._get_tool_specific_outputs())
 
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(provenance, f, indent=2)
 
         logger.success(f"Saved provenance to {filepath}")
-
-    def _get_version(self) -> str:
-        """Get MoveDB version."""
-        try:
-            import movedb
-            return movedb.__version__
-        except AttributeError:
-            return "unknown"
 
     def _get_tool_specific_outputs(self) -> dict:
         """Override in subclasses to add tool-specific output paths."""
@@ -128,7 +121,7 @@ class ToolResult(BaseModel):
             warnings=data.get("warnings", []),
             errors=data.get("errors", []),
             settings_dict=data.get("settings"),
-            **cls._parse_tool_specific_outputs(data["outputs"])
+            **cls._parse_tool_specific_outputs(data["outputs"]),
         )
 
     @classmethod
@@ -139,7 +132,7 @@ class ToolResult(BaseModel):
 
 class IKResult(ToolResult):
     """Result from Inverse Kinematics analysis.
-    
+
     Attributes
     ----------
     output_motion_file : str
@@ -147,9 +140,10 @@ class IKResult(ToolResult):
     marker_file : str
         Path to the input marker (.trc) file used
     """
+
     output_motion_file: str = Field(description="Path to output motion file (.mot)")
     marker_file: str = Field(description="Path to input marker file (.trc)")
-    
+
     @property
     def motion_path(self) -> Path:
         """Get path to motion file."""
@@ -171,7 +165,7 @@ class IKResult(ToolResult):
 
 class IDResult(ToolResult):
     """Result from Inverse Dynamics analysis.
-    
+
     Attributes
     ----------
     output_forces_file : str
@@ -179,10 +173,13 @@ class IDResult(ToolResult):
     coordinates_file : str
         Path to the input coordinates (.mot) file used
     """
+
     output_forces_file: str = Field(description="Path to output forces file (.sto)")
     coordinates_file: str = Field(description="Path to input coordinates file (.mot)")
-    external_loads_file: str | None = Field(None, description="Path to external loads file if used")
-    
+    external_loads_file: str | None = Field(
+        None, description="Path to external loads file if used"
+    )
+
     @property
     def forces_path(self) -> Path:
         """Get path to forces file."""
@@ -206,7 +203,7 @@ class IDResult(ToolResult):
 
 class CMCResult(ToolResult):
     """Result from Computed Muscle Control analysis.
-    
+
     Attributes
     ----------
     output_controls_file : str
@@ -216,15 +213,16 @@ class CMCResult(ToolResult):
     desired_kinematics_file : str
         Path to the input desired kinematics file
     """
+
     output_controls_file: str = Field(description="Path to output controls file")
     output_kinematics_file: str = Field(description="Path to output kinematics file")
     desired_kinematics_file: str = Field(description="Path to input desired kinematics")
-    
+
     @property
     def controls_path(self) -> Path:
         """Get path to controls file."""
         return Path(self.output_controls_file)
-    
+
     @property
     def kinematics_path(self) -> Path:
         """Get path to kinematics file."""
@@ -233,7 +231,7 @@ class CMCResult(ToolResult):
 
 class ScaleResult(ToolResult):
     """Result from Scale Tool analysis.
-    
+
     Attributes
     ----------
     output_model_file : str
@@ -243,10 +241,11 @@ class ScaleResult(ToolResult):
     input_marker_file : str
         Path to the input marker file used for scaling
     """
+
     output_model_file: str = Field(description="Path to scaled model file")
     output_marker_set: str | None = Field(None, description="Path to output marker set")
     input_marker_file: str = Field(description="Path to input marker file")
-    
+
     @property
     def model_path(self) -> Path:
         """Get path to scaled model."""
