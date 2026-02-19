@@ -49,18 +49,18 @@ class IDSettings(ToolSettings):
         """
         tool = osim.InverseDynamicsTool()
 
-        tool.setModelFileName(self.model_file)
+        tool.setModelFileName(str(self.model_file))
 
         # Set results directory
-        tool.setResultsDir(self.results_directory)
+        tool.setResultsDir(str(self.results_directory))
 
         # Set external loads if provided
         if self.external_loads_file:
-            tool.setExternalLoadsFileName(self.external_loads_file)
+            tool.setExternalLoadsFileName(str(self.external_loads_file))
 
         # Set coordinates and output files
-        tool.setCoordinatesFileName(self.coordinates_file)
-        tool.setOutputGenForceFileName(self.output_forces_file)
+        tool.setCoordinatesFileName(str(self.coordinates_file))
+        tool.setOutputGenForceFileName(str(self.output_forces_file))
 
         # Set filtering
         if self.lowpass_cutoff_frequency > 0:
@@ -75,7 +75,7 @@ class IDSettings(ToolSettings):
 
         # Set time range (auto-detect from coordinates file if needed)
         if self.initial_time == -1.0 or self.final_time == -1.0:
-            sto = osim.Storage(self.coordinates_file)
+            sto = osim.Storage(str(self.coordinates_file))
             if self.initial_time == -1.0:
                 tool.setStartTime(sto.getFirstTime())
             else:

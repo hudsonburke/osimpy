@@ -54,10 +54,10 @@ class IKSettings(ToolSettings):
         """
         tool = osim.InverseKinematicsTool()
 
-        tool.set_model_file(self.model_file)
-        tool.setResultsDir(self.results_directory)
-        tool.setMarkerDataFileName(self.marker_file)
-        tool.setOutputMotionFileName(self.output_motion_file)
+        tool.set_model_file(str(self.model_file))
+        tool.setResultsDir(str(self.results_directory))
+        tool.setMarkerDataFileName(str(self.marker_file))
+        tool.setOutputMotionFileName(str(self.output_motion_file))
 
         if self.task_set is not None:
             tool.set_IKTaskSet(self.task_set)

@@ -1,4 +1,6 @@
 import opensim as osim
+from datetime import datetime
+import glob
 from pydantic import Field, FilePath, DirectoryPath, NewPath
 from typing import Literal
 from pathlib import Path
@@ -185,34 +187,130 @@ class CMCSettings(ToolSettings):
         tool = osim.CMCTool()
 
         # Set results directory and time range
-        tool.setResultsDir(self.results_directory)
+        tool.setResultsDir(str(self.results_directory))
         tool.setInitialTime(self.initial_time)
         tool.setFinalTime(self.final_time)
 
         # Set external loads if provided
         if self.external_loads_file:
-            tool.setExternalLoadsFileName(self.external_loads_file)
+            tool.setExternalLoadsFileName(str(self.external_loads_file))
 
         # Set force set files if provided
         if self.force_set_files:
             force_set_array = osim.ArrayStr()
             for file_path in self.force_set_files:
-                force_set_array.append(file_path)
+                force_set_array.append(str(file_path))
             tool.setForceSetFiles(force_set_array)
 
         # Set CMC-specific settings
-        tool.setDesiredPointsFileName(self.desired_points_file)
-        tool.setDesiredKinematicsFileName(self.desired_kinematics_file)
-        tool.setTaskSetFileName(self.task_set_file)
-        tool.setConstraintsFileName(self.constraints_file)
-        tool.setRRAControlsFileName(self.rra_controls_file)
+        tool.setDesiredPointsFileName(
+            str(self.desired_points_file) if self.desired_points_file else ""
+        )
+        tool.setDesiredKinematicsFileName(
+            str(self.desired_kinematics_file) if self.desired_kinematics_file else ""
+        )
+        tool.setTaskSetFileName(str(self.task_set_file) if self.task_set_file else "")
+        tool.setConstraintsFileName(
+            str(self.constraints_file) if self.constraints_file else ""
+        )
+        tool.setRRAControlsFileName(
+            str(self.rra_controls_file) if self.rra_controls_file else ""
+        )
         tool.setLowpassCutoffFrequency(self.lowpass_cutoff_frequency)
         tool.setUseFastTarget(self.use_fast_optimization_target)
 
         return tool
 
-    def run(self) -> None:
-        import os
+    def save_setup(self, filepath: str | None = None) -> str:
+        """Save CMC tool setup to XML file with explicit model file.
 
-        model_dir = Path(self.model_file).parent
-        os.chdir(model_dir)
+        Args:
+            filepath: Optional path to save the setup XML.
+
+        Returns:
+            Path to the saved setup XML.
+        """
+        tool = self.create_tool()
+
+        if filepath is None:
+            results_dir = Path(self.results_directory)
+            results_dir.mkdir(parents=True, exist_ok=True)
+            filepath = str(results_dir / "cmc_setup.xml")
+
+        tool.printToXML(filepath)
+
+        with open(filepath, "r", encoding="utf-8") as setup_file:
+            content = setup_file.read()
+
+        content = content.replace(
+            "<model_file />", f"<model_file>{self.model_file}</model_file>"
+        )
+
+        with open(filepath, "w", encoding="utf-8") as setup_file:
+            setup_file.write(content)
+
+        return filepath
+
+    def run(self) -> CMCResult:
+        """Execute CMC analysis using XML-based workflow.
+
+        Returns:
+            Structured CMC result with discovered output file paths.
+        """
+        results_dir = Path(self.results_directory)
+        results_dir.mkdir(parents=True, exist_ok=True)
+
+        warnings = []
+        errors = []
+        success = False
+        start_time = datetime.now()
+
+        try:
+            setup_file = self.save_setup()
+
+            model = osim.Model(str(self.model_file))
+            model.initSystem()
+
+            tool = osim.CMCTool(setup_file, False)
+            tool.setModel(model)
+            run_result = tool.run()
+            success = run_result if isinstance(run_result, bool) else True
+
+        except Exception as exception:
+            errors.append(str(exception))
+            setup_file = str(results_dir / "failed_cmc_setup.xml")
+            raise RuntimeError(f"Tool execution failed: {exception}") from exception
+
+        finally:
+            end_time = datetime.now()
+
+        controls_candidates = sorted(glob.glob(str(results_dir / "*controls*.sto")))
+        forces_candidates = sorted(glob.glob(str(results_dir / "*Actuation_force*.sto")))
+        if not forces_candidates:
+            forces_candidates = sorted(glob.glob(str(results_dir / "*force*.sto")))
+        states_candidates = sorted(glob.glob(str(results_dir / "*states*.sto")))
+
+        if not controls_candidates:
+            controls_candidates = sorted(glob.glob(str(results_dir / "*_controls.xml")))
+        if not controls_candidates:
+            raise RuntimeError(
+                f"CMC finished but no controls file found in {results_dir}."
+            )
+        if not forces_candidates:
+            raise RuntimeError(f"CMC finished but no forces file found in {results_dir}.")
+        if not states_candidates:
+            raise RuntimeError(f"CMC finished but no states file found in {results_dir}.")
+
+        return CMCResult(
+            success=success,
+            setup_file=Path(setup_file),
+            results_directory=self.results_directory,
+            start_time=start_time,
+            end_time=end_time,
+            run_time=(end_time - start_time).total_seconds(),
+            warnings=warnings,
+            errors=errors,
+            controls_file=Path(controls_candidates[0]),
+            forces_file=Path(forces_candidates[0]),
+            states_file=Path(states_candidates[0]),
+        )
