@@ -1,10 +1,12 @@
-from .cmc import CMCSettings  # CMC not available in pyopensim
-from .id import IDSettings
-from .ik import IKSettings
-from .scale import ScaleSettings
-from .results import ToolResult, IKResult, IDResult, CMCResult, ScaleResult
+from .cmc import CMCSettings, CMCResult
+from .id import IDSettings, IDResult
+from .ik import IKSettings, IKResult
+from .scale import ScaleSettings, ScaleResult
+from .tool import ToolSettings, ToolResult
+
 
 __all__ = [
+    "ToolSettings",
     "CMCSettings",
     "IDSettings",
     "IKSettings",
