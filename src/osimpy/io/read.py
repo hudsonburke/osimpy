@@ -1,20 +1,7 @@
 """OpenSim file reading functionality."""
-import numpy as np
+
 import polars as pl
-from pydantic import BaseModel
 
-# TODO: Maybe use this for the metadata return
-class BaseMetadata(BaseModel):
-    name: str = ''
-    version: str = ''
-
-class STOMetadata(BaseMetadata):
-    pass
-class TRCMetadata(BaseMetadata):
-    pass
-
-def sto_to_numpy(file_path: str) -> np.ndarray: #TODO
-    return np.zeros(1)
 
 def sto_to_df(file_path: str) -> tuple[pl.DataFrame, dict[str, str]]:
     """

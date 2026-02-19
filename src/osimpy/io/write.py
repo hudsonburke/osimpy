@@ -73,9 +73,6 @@ def export_trc(
     adapter.write(table, filepath)
 
 
-# ===== MOT Export =====
-
-
 def export_mot(
     filepath: str,
     data: pl.DataFrame,
@@ -124,9 +121,6 @@ def export_mot(
         mot_table.addTableMetaDataString(key, str(value))
     mot_file = osim.STOFileAdapter()
     mot_file.write(mot_table, filepath)
-
-
-# ===== External Loads and Force Platforms =====
 
 
 class OpenSimExternalForce(BaseModel):

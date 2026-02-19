@@ -1,14 +1,27 @@
-import json
-import hashlib
-from loguru import logger
 import opensim as osim
 from datetime import datetime
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from .results import IKResult
+from pydantic import Field, ConfigDict, FilePath, NewPath, BaseModel
+from .tool import ToolSettings, ToolResult
+
+class IKTask(BaseModel):
+    pass
 
 
-class IKSettings(BaseModel):
+class IKResult(ToolResult):
+    """Result from Inverse Kinematics analysis.
+
+    Attributes
+    ----------
+    output_motion_file : str
+        Path to the output motion (.mot) file containing computed coordinates
+
+    """
+
+    motion_file: FilePath = Field(description="Path to output motion file (.mot)")
+
+
+class IKSettings(ToolSettings):
     """Inverse Kinematics tool settings.
 
     Configure and run inverse kinematics analysis to compute joint angles
@@ -17,14 +30,9 @@ class IKSettings(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    model_file: str = Field(
-        description="Name of the .osim file used to construct a model."
-    )
-    marker_file: str = Field(description="Path to marker data file (.trc)")
-    output_motion_file: str = Field(description="Path for output motion file (.mot)")
-    results_directory: str = Field(
-        ".", description="Directory used for writing results."
-    )
+    marker_file: FilePath = Field(description="Path to marker data file (.trc)")
+    output_motion_file: NewPath = Field(description="Path for output motion file (.mot)")
+
     task_set: osim.IKTaskSet | None = Field(
         None, description="IK task set for tracking"
     )
@@ -55,37 +63,7 @@ class IKSettings(BaseModel):
             tool.set_IKTaskSet(self.task_set)
 
         return tool
-
-    def save_setup(self, filepath: str | None = None) -> str:
-        """Save IK tool setup to XML file with model file path.
-
-        Parameters
-        ----------
-        filepath : str | None
-            Path to save the setup file. If None, uses results_directory
-            with a default name.
-
-        Returns
-        -------
-        str
-            Path to the saved setup file
-        """
-        tool = self.create_tool()
-
-        if filepath is None:
-            # Create default setup filename in results directory
-            from pathlib import Path
-
-            results_dir = Path(self.results_directory)
-            results_dir.mkdir(parents=True, exist_ok=True)
-            tool_name = self.__class__.__name__.replace("Settings", "").lower()
-            filepath = str(results_dir / f"{tool_name}_setup.xml")
-
-        # Write to XML, then add model file manually
-        tool.printToXML(filepath)
-
-        return filepath
-
+    
     def run(self) -> IKResult:
         """Execute IK analysis using XML-based workflow.
 
@@ -129,76 +107,12 @@ class IKSettings(BaseModel):
 
         return IKResult(
             success=success,
-            setup_file=setup_file,
+            setup_file=Path(setup_file),
             results_directory=self.results_directory,
             start_time=start_time,
             end_time=end_time,
             run_time=(end_time - start_time).total_seconds(),
             warnings=warnings,
             errors=errors,
-            output_motion_file=self.output_motion_file,
-            marker_file=self.marker_file,
-            settings_dict=self.to_dict(),
+            motion_file=self.output_motion_file,
         )
-
-    def to_dict(self) -> dict:
-        """Export settings as dictionary for reproducibility.
-
-        Returns:
-            Dictionary containing all settings with JSON-compatible types.
-
-        Example:
-            >>> settings = IKSettings(...)
-            >>> data = settings.to_dict()
-            >>> # Can be saved as JSON for thesis documentation
-        """
-        return self.model_dump(mode="json")
-
-    def save_json(self, filepath: str) -> None:
-        """Save settings as JSON file for easy tracking.
-
-        Args:
-            filepath: Path to save JSON file
-
-        Example:
-            >>> settings = IKSettings(...)
-            >>> settings.save_json("ik_settings.json")
-            >>> # Creates reproducible parameter record
-        """
-        with open(filepath, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
-        logger.info(f"Saved settings to {filepath}")
-
-    @classmethod
-    def from_json(cls, filepath: str):
-        """Load settings from JSON file.
-
-        Args:
-            filepath: Path to JSON file
-
-        Returns:
-            Settings instance with loaded parameters
-
-        Example:
-            >>> settings = IKSettings.from_json("ik_settings.json")
-            >>> result = settings.run()  # Exact same parameters
-        """
-        with open(filepath) as f:
-            data = json.load(f)
-        logger.info(f"Loaded settings from {filepath}")
-        return cls(**data)
-
-    def get_hash(self) -> str:
-        """Get deterministic hash of settings for caching/comparison.
-
-        Returns:
-            SHA256 hash of settings
-
-        Example:
-            >>> hash1 = settings.get_hash()
-            >>> # Later...
-            >>> hash2 = settings.get_hash()
-            >>> assert hash1 == hash2  # Same settings = same hash
-        """
-        settings_str = json.dumps(self.to_dict(), sort_keys=True)
-        return hashlib.sha256(settings_str.encode()).hexdigest()

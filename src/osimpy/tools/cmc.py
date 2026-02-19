@@ -1,38 +1,35 @@
-import json
-import hashlib
-from loguru import logger
 import opensim as osim
-from datetime import datetime
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, FilePath, DirectoryPath, NewPath
 from typing import Literal
-import glob
-from .results import CMCResult
+from pathlib import Path
+from .tool import ToolSettings, ToolResult
 
 
-class CMCSettings(BaseModel):
+class CMCResult(ToolResult):
+    """Result from Computed Muscle Control analysis."""
+
+    controls_file: FilePath = Field(description="Path to output controls file")
+    forces_file: FilePath = Field(description="Path to output forces file")
+    states_file: FilePath = Field(description="Path to output states file")
+
+class CMCSettings(ToolSettings):
     """CMC (Computed Muscle Control) settings.
 
     Descriptions are available in Field(...) metadata for runtime/schema usage.
+
+    References
+    ----------
+    1. OpenSim CMC User Guide:
+    https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53089721/CMC+Settings+Files+and+XML+Tag+Definitions
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    initial_time: float = Field(description="Initial time for the simulation")
+    final_time: float = Field(description="Final time for the simulation")
 
-    # Core parameters
-    model_file: str = Field(description="Path to OpenSim model file (.osim)")
-    results_directory: str = Field(
-        ".", description="Directory for results and setup files"
-    )
-
-    # Time range
-    initial_time: float = Field(description="Initial time for analysis")
-    final_time: float = Field(description="Final time for analysis")
-
-    # Optional settings
-    external_loads_file: str | None = Field(
+    external_loads_file: FilePath | None = Field(
         None, description="Path to external loads XML file"
     )
-    force_set_files: list[str] = Field(
+    force_set_files: list[FilePath] = Field(
         default_factory=list,
         description="Paths to force set files (.xml) to add actuators",
     )
@@ -61,33 +58,33 @@ class CMCSettings(BaseModel):
             "step size is decreased."
         ),
     )
-    desired_points_file: str = Field(
-        "",
+    desired_points_file: FilePath | None = Field(
+        None,
         description=(
             "Motion (.mot) or storage (.sto) file containing the desired point "
             "trajectories."
         ),
     )
-    desired_kinematics_file: str = Field(
-        "",
+    desired_kinematics_file: FilePath | None = Field(
+        None,
         description=(
             "Motion (.mot) or storage (.sto) file containing the desired kinematic "
             "trajectories."
         ),
     )
-    task_set_file: str = Field(
-        "",
+    task_set_file: FilePath | None = Field(
+        None,
         description=(
             "File containing the tracking tasks. Which coordinates are tracked and "
             "with what weights are specified here."
         ),
     )
-    constraints_file: str = Field(
-        "",
+    constraints_file: FilePath | None = Field(
+        None,
         description="File containing the constraints on the controls.",
     )
-    rra_controls_file: str = Field(
-        "",
+    rra_controls_file: FilePath | None = Field(
+        None,
         description=(
             "File containing the controls output by RRA. These can be used to place "
             "constraints on the residuals during CMC."
@@ -214,190 +211,8 @@ class CMCSettings(BaseModel):
 
         return tool
 
-    def save_setup(self, filepath: str | None = None) -> str:
-        """Save CMC tool setup to XML file with model file path.
+    def run(self) -> None:
+        import os
 
-        Parameters
-        ----------
-        filepath : str | None
-            Path to save the setup file. If None, uses results_directory
-            with a default name.
-
-        Returns
-        -------
-        str
-            Path to the saved setup file
-        """
-        tool = self.create_tool()
-
-        if filepath is None:
-            # Create default setup filename in results directory
-            from pathlib import Path
-
-            results_dir = Path(self.results_directory)
-            results_dir.mkdir(parents=True, exist_ok=True)
-            tool_name = self.__class__.__name__.replace("Settings", "").lower()
-            filepath = str(results_dir / f"{tool_name}_setup.xml")
-
-        # Write to XML
-        tool.printToXML(filepath)
-
-        # Read the XML file and replace the empty model_file element
-        with open(filepath, "r") as f:
-            content = f.read()
-
-        # Replace the empty model_file tag with the actual path
-        # The printToXML() writes <model_file /> which we need to replace
-        content = content.replace(
-            "<model_file />", "<model_file>{}</model_file>".format(self.model_file)
-        )
-
-        with open(filepath, "w") as f:
-            f.write(content)
-
-        return filepath
-
-    def run(self) -> CMCResult:
-        """Execute CMC analysis and return results.
-
-        CMC requires explicitly loading and setting the model.
-
-        Returns
-        -------
-        CMCResult
-            Structured CMC results with controls and kinematics file paths
-        """
-        # Ensure results directory exists
-        results_dir = Path(self.results_directory)
-        results_dir.mkdir(parents=True, exist_ok=True)
-
-        warnings = []
-        errors = []
-        success = False
-        start_time = datetime.now()
-
-        try:
-            # First create and save the setup XML
-            setup_file = self.save_setup()
-
-            # Load the model explicitly
-            model = osim.Model(self.model_file)
-
-            # Initialize the system
-            state = model.initSystem()
-
-            # Load CMC tool from the XML file
-            tool = osim.CMCTool(
-                setup_file, False
-            )  # False = don't update from old versions
-
-            # Set the model on the tool
-            tool.setModel(model)
-
-            # Execute tool
-            result = tool.run()
-            success = result if isinstance(result, bool) else True
-
-        except Exception as e:
-            errors.append(str(e))
-            setup_file = str(results_dir / "failed_setup.xml")
-            raise RuntimeError(f"Tool execution failed: {e}") from e
-
-        finally:
-            end_time = datetime.now()
-
-        # CMC creates output files with specific naming patterns
-        # Try to find the actual output files
-        controls_pattern = str(results_dir / "*_controls.xml")
-        kinematics_pattern = str(results_dir / "*_Kinematics*.sto")
-
-        controls_files = glob.glob(controls_pattern)
-        kinematics_files = glob.glob(kinematics_pattern)
-
-        # Use the first match if found, otherwise use default names
-        output_controls = (
-            controls_files[0]
-            if controls_files
-            else str(results_dir / "cmc_controls.sto")
-        )
-        output_kinematics = (
-            kinematics_files[0]
-            if kinematics_files
-            else str(results_dir / "cmc_kinematics.sto")
-        )
-
-        return CMCResult(
-            success=success,
-            setup_file=setup_file,
-            results_directory=self.results_directory,
-            start_time=start_time,
-            end_time=end_time,
-            run_time=(end_time - start_time).total_seconds(),
-            warnings=warnings,
-            errors=errors,
-            output_controls_file=output_controls,
-            output_kinematics_file=output_kinematics,
-            desired_kinematics_file=self.desired_kinematics_file,
-        )
-
-    def to_dict(self) -> dict:
-        """Export settings as dictionary for reproducibility.
-
-        Returns:
-            Dictionary containing all settings with JSON-compatible types.
-
-        Example:
-            >>> settings = CMCSettings(...)
-            >>> data = settings.to_dict()
-            >>> # Can be saved as JSON for thesis documentation
-        """
-        return self.model_dump(mode="json")
-
-    def save_json(self, filepath: str) -> None:
-        """Save settings as JSON file for easy tracking.
-
-        Args:
-            filepath: Path to save JSON file
-
-        Example:
-            >>> settings = CMCSettings(...)
-            >>> settings.save_json("cmc_settings.json")
-            >>> # Creates reproducible parameter record
-        """
-        with open(filepath, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
-        logger.info(f"Saved settings to {filepath}")
-
-    @classmethod
-    def from_json(cls, filepath: str):
-        """Load settings from JSON file.
-
-        Args:
-            filepath: Path to JSON file
-
-        Returns:
-            Settings instance with loaded parameters
-
-        Example:
-            >>> settings = CMCSettings.from_json("cmc_settings.json")
-            >>> result = settings.run()  # Exact same parameters
-        """
-        with open(filepath) as f:
-            data = json.load(f)
-        logger.info(f"Loaded settings from {filepath}")
-        return cls(**data)
-
-    def get_hash(self) -> str:
-        """Get deterministic hash of settings for caching/comparison.
-
-        Returns:
-            SHA256 hash of settings
-
-        Example:
-            >>> hash1 = settings.get_hash()
-            >>> # Later...
-            >>> hash2 = settings.get_hash()
-            >>> assert hash1 == hash2  # Same settings = same hash
-        """
-        settings_str = json.dumps(self.to_dict(), sort_keys=True)
-        return hashlib.sha256(settings_str.encode()).hexdigest()
+        model_dir = Path(self.model_file).parent
+        os.chdir(model_dir)

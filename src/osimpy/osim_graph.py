@@ -13,6 +13,43 @@ import math
 T = TypeVar("T")
 
 
+def _process_coord_set_parallel(
+    model_path: str,
+    coord_set: frozenset,
+    muscles: set,
+    min_points: int,
+    locked_coords: set,
+) -> dict:
+    """
+    Process a single coordinate set for parallel execution.
+    Must be at module level for pickling.
+
+    Args:
+        model_path: Path to the OpenSim model file (to recreate model in subprocess)
+        coord_set: Frozenset of coordinate names
+        muscles: Set of muscle names
+        min_points: Minimum number of points to sample
+        locked_coords: Set of locked coordinate names
+
+    Returns:
+        Dictionary mapping muscle names to DataFrames
+    """
+    # Recreate model and graph in this process
+    model = osim.Model(model_path)
+    # Can't import from self, so recreate inline
+    # The graph will be built automatically via the validator
+    graph = OsimGraph(osim_model=model, model_path=model_path)
+    state = graph.osim_model.initSystem()
+
+    # Filter unlocked coordinates
+    unlocked_coords = coord_set - locked_coords
+    if not unlocked_coords:
+        return {}
+
+    df = graph.get_muscle_lengths_rom(list(muscles), min_points=min_points, state=state)
+    return {muscle: df[list(unlocked_coords) + [muscle]] for muscle in muscles}
+
+
 class OsimGraph(BaseModel):
     """
     A graph data structure representation of an OpenSim model with convenience functions.
@@ -62,27 +99,19 @@ class OsimGraph(BaseModel):
         ...     min_points=20,
         ...     state=state  # Reuse state for efficiency
         ... )
-        >>>
-        >>> # Visualize body connectivity (requires networkx and matplotlib)
-        >>> graph.draw_graph("body", layout="kamada_kawai")
-        >>>
-        >>> # Export to NetworkX for custom analysis
-        >>> G = graph.to_networkx("muscle")
-        >>> import networkx as nx
-        >>> print(f"Graph density: {nx.density(G)}")
 
     Note:
         The graph is built automatically during initialization via the build_graph()
         validator. For large models, this may take several seconds.
-
-        NetworkX visualization features are optional and require:
-        - networkx: pip install networkx
-        - matplotlib: pip install matplotlib
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     osim_model: osim.Model
+    model_path: str | None = Field(
+        default=None,
+        description="Path to the model file (needed for parallel processing)",
+    )
 
     joint_bodies: dict[str, tuple[str, str]] = Field(
         default_factory=dict, description="Joint name -> (parent name, child name)"
@@ -148,6 +177,17 @@ class OsimGraph(BaseModel):
     coord_ranges: dict[str, tuple[float, float]] = Field(
         default_factory=dict, description="Coordinate name -> (min, max) range"
     )
+    locked_coords: set[str] = Field(
+        default_factory=set, description="Set of locked coordinate names"
+    )
+    joint_muscles: dict[str, set[str]] = Field(
+        default_factory=lambda: defaultdict(set),
+        description="Joint name -> muscle names crossing it (reverse index)",
+    )
+    coord_muscles: dict[str, set[str]] = Field(
+        default_factory=lambda: defaultdict(set),
+        description="Coordinate name -> muscle names actuating it (reverse index)",
+    )
     log_level: Literal[
         "TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"
     ] = Field(default="ERROR", description="Logging level for the graph operations")
@@ -193,7 +233,7 @@ class OsimGraph(BaseModel):
             >>> print(graph.get_summary())
         """
         osim_model = osim.Model(model_path)
-        return cls(osim_model=osim_model)
+        return cls(osim_model=osim_model, model_path=model_path)
 
     def _get_component(self, name: str, component_set: Any, component_type: str) -> T:
         """
@@ -295,6 +335,35 @@ class OsimGraph(BaseModel):
             raise ValueError(f"Wrap object '{wrap_name}' not found in the model.")
         return self.get_body(body).getWrapObject(wrap_name)
 
+    def _validate_state_realized(self, state: osim.State) -> None:
+        """
+        Validate that state is realized to at least Position stage.
+
+        Args:
+            state: OpenSim State to validate
+
+        Raises:
+            RuntimeError: If state is not realized to at least Position stage
+
+        Note:
+            This validation helps provide clearer error messages when users
+            attempt to query muscle lengths without properly realizing the state.
+        """
+        try:
+            # Try to check the realization stage
+            # OpenSim's State.getSystemStage() returns the current stage
+            stage = state.getSystemStage()
+            # Stage values: Topology=0, Model=1, Instance=2, Time=3, Position=4, Velocity=5, etc.
+            # We need at least Position (4) for muscle length queries
+            if stage.getValue() < 4:  # Less than Position stage
+                raise RuntimeError(
+                    f"State must be realized to at least Position stage for muscle length queries. "
+                    f"Current stage: {stage}. Call model.realizePosition(state) first."
+                )
+        except Exception as e:
+            # If we can't check the stage, log a warning but don't fail
+            logger.warning(f"Could not validate state realization: {e}")
+
     def _process_body_wraps(self, body_name: str, body: osim.Frame):
         """
         Process wrap objects for a body.
@@ -321,13 +390,12 @@ class OsimGraph(BaseModel):
             # RuntimeError: OpenSim-specific errors during wrap access
             logger.warning(
                 f"Could not process wrap objects for body '{body_name}': {e}. "
-                "This body may not support wrap objects or has an incompatible frame type."
+                "This body may not support wrap objects or has an incompatible frame type.",
             )
         except Exception as e:
             # Unexpected error - log at error level and include more context
             logger.error(
                 f"Unexpected error processing wrap objects for body '{body_name}': {type(e).__name__}: {e}",
-                exc_info=True,
             )
 
     def create_rigid_graph(self):
@@ -340,6 +408,7 @@ class OsimGraph(BaseModel):
         - body_graph: Creates undirected graph of body adjacencies
         - joint_coords: Maps joints to their coordinate sets
         - coord_ranges: Stores coordinate min/max ranges
+        - locked_coords: Set of locked coordinate names
         - body_wraps: Maps bodies to their wrap objects
         - wrap_body: Maps wrap objects back to their bodies
 
@@ -361,7 +430,7 @@ class OsimGraph(BaseModel):
             self.joint_bodies[joint_name] = (parent_name, child_name)
             self.bodies_joint[frozenset([parent_name, child_name])] = joint_name
 
-            # Add coordinates to the joint's set
+            # Add coordinates to the joint's set and check for locked status
             for j in range(joint.numCoordinates()):
                 coord: osim.Coordinate = joint.get_coordinates(j)
                 coord_name = coord.getName()
@@ -371,8 +440,11 @@ class OsimGraph(BaseModel):
                     coord.getRangeMin(),
                     coord.getRangeMax(),
                 )
+                # Pre-compute locked status
+                if coord.getDefaultLocked():
+                    self.locked_coords.add(coord_name)
                 logger.debug(
-                    f"Coordinate {coord_name} range: {self.coord_ranges[coord_name]}"
+                    f"Coordinate {coord_name} range: {self.coord_ranges[coord_name]}, locked: {coord.getDefaultLocked()}"
                 )
 
             # Build undirected graph of body connections
@@ -403,27 +475,27 @@ class OsimGraph(BaseModel):
             muscle_name = muscle.getName()
             path: osim.GeometryPath = muscle.getGeometryPath()
 
-            # Store bodies this muscle attaches to
+            # Store bodies this muscle attaches to (use dict.fromkeys to preserve order and uniqueness)
             path_points: osim.PathPointSet = path.getPathPointSet()
-            attached_bodies = []
+            body_names_seen = {}
             for j in range(path_points.getSize()):
                 path_point: osim.PathPoint = path_points.get(j)
                 frame: osim.Frame = path_point.getParentFrame()
                 body: osim.Frame = frame.findBaseFrame()
                 body_name = body.getName()
-                if body_name not in attached_bodies:
-                    attached_bodies.append(body_name)
+                body_names_seen[body_name] = None
+            attached_bodies = list(body_names_seen.keys())
             self.muscle_attachments[muscle_name] = attached_bodies
 
-            # Store wrap objects
+            # Store wrap objects (use dict.fromkeys to preserve order and uniqueness)
             path_wraps: osim.PathWrapSet = path.getWrapSet()
-            wrap_objects = []
+            wrap_names_seen = {}
             for j in range(path_wraps.getSize()):
                 path_wrap: osim.PathWrap = path_wraps.get(j)
                 wrap_object_name = path_wrap.getWrapObjectName()
-                if wrap_object_name not in wrap_objects:
-                    wrap_objects.append(wrap_object_name)
+                wrap_names_seen[wrap_object_name] = None
                 self.wraps_muscles[wrap_object_name].add(muscle_name)
+            wrap_objects = list(wrap_names_seen.keys())
             self.muscle_wraps[muscle_name] = wrap_objects
 
             logger.debug(
@@ -457,7 +529,7 @@ class OsimGraph(BaseModel):
 
     def find_path(self, bodies: list[str]) -> list[str]:
         """
-        Find the shortest path between bodies using BFS.
+        Find the shortest path between bodies using BFS with parent tracking.
         Uses a frozenset for order-independent caching of paths.
 
         Args:
@@ -489,14 +561,23 @@ class OsimGraph(BaseModel):
         if start == end:
             return [start]
 
-        # BFS to find shortest path
+        # BFS to find shortest path using parent tracking
         visited = {start}
-        queue = deque([(start, [start])])
+        parent: dict[str, str | None] = {start: None}
+        queue = deque([start])
 
         while queue:
-            current, path = queue.popleft()
+            current = queue.popleft()
 
             if current == end:
+                # Reconstruct path from parent tracking
+                path = []
+                node: str | None = end
+                while node is not None:
+                    path.append(node)
+                    node = parent[node]
+                path.reverse()
+
                 self.path_cache[cache_key] = path
                 logger.debug(f"Path found between {start} and {end}: {path}")
                 return path
@@ -504,7 +585,8 @@ class OsimGraph(BaseModel):
             for neighbor in self.body_graph.get(current, set()):
                 if neighbor not in visited:
                     visited.add(neighbor)
-                    queue.append((neighbor, path + [neighbor]))
+                    parent[neighbor] = current
+                    queue.append(neighbor)
 
         logger.debug(f"No path found between {start} and {end}.")
         return []
@@ -518,12 +600,15 @@ class OsimGraph(BaseModel):
         2. Identifies which joints are crossed
         3. Determines which coordinates are actuated
         4. Creates bidirectional mappings for fast lookups
+        5. Builds reverse indices for O(1) joint->muscles and coord->muscles lookups
 
         Populates:
         - muscle_crossings: Muscle -> set of crossed joints
         - crossings_muscle: Frozenset of joints -> muscles that cross them
         - muscle_coords: Muscle -> set of actuated coordinates
         - coords_muscles: Frozenset of coords -> muscles that actuate them
+        - joint_muscles: Joint -> muscles crossing it (reverse index)
+        - coord_muscles: Coordinate -> muscles actuating it (reverse index)
 
         This method is called automatically during initialization and uses
         the find_path() method which employs BFS for shortest path finding.
@@ -540,12 +625,22 @@ class OsimGraph(BaseModel):
 
             self.muscle_crossings[muscle_name] = crossed_joints
             self.crossings_muscle[frozenset(crossed_joints)].add(muscle_name)
+
+            # Build reverse index: joint -> muscles
+            for joint in crossed_joints:
+                self.joint_muscles[joint].add(muscle_name)
+
+            # Determine actuated coordinates
             self.muscle_coords[muscle_name] = set().union(
                 *(self.joint_coords[joint] for joint in crossed_joints)
             )
             self.coords_muscles[frozenset(self.muscle_coords[muscle_name])].add(
                 muscle_name
             )
+
+            # Build reverse index: coord -> muscles
+            for coord in self.muscle_coords[muscle_name]:
+                self.coord_muscles[coord].add(muscle_name)
 
             logger.debug(f"Muscle {muscle_name} crosses joints {crossed_joints}")
 
@@ -563,11 +658,8 @@ class OsimGraph(BaseModel):
             >>> muscles = graph.get_muscles_crossing_joint("knee_r")
             >>> print(f"Knee is crossed by: {muscles}")
         """
-        return {
-            muscle
-            for muscle, joints in self.muscle_crossings.items()
-            if joint_name in joints
-        }
+        # Use reverse index for O(1) lookup
+        return self.joint_muscles.get(joint_name, set())
 
     def get_muscles_actuating_coord(self, coord_name: str) -> set[str]:
         """
@@ -583,11 +675,8 @@ class OsimGraph(BaseModel):
             >>> muscles = graph.get_muscles_actuating_coord("knee_angle_r")
             >>> print(f"Coordinate actuated by: {muscles}")
         """
-        return {
-            muscle
-            for muscle, coords in self.muscle_coords.items()
-            if coord_name in coords
-        }
+        # Use reverse index for O(1) lookup
+        return self.coord_muscles.get(coord_name, set())
 
     def get_joint_dof(self, joint_name: str) -> int:
         """
@@ -838,17 +927,52 @@ class OsimGraph(BaseModel):
 
         Returns:
             DataFrame with coordinate columns followed by muscle length columns.
+
+        Note:
+            Locked coordinates are automatically filtered out and will not appear
+            in the results. Only unlocked (variable) coordinates are included.
         """
+        # Collect all coordinates that the muscles cross
         muscle_coords = list(
             set().union(*(self.muscle_coords[muscle] for muscle in muscle_names))
         )
+
+        # Filter out locked coordinates to avoid setValue() errors
+        unlocked_coords = [
+            coord for coord in muscle_coords if coord not in self.locked_coords
+        ]
+
+        # Warn if any coordinates were filtered out
+        locked_in_set = set(muscle_coords) - set(unlocked_coords)
+        if locked_in_set:
+            logger.debug(
+                f"Excluding locked coordinates from ROM calculation: {locked_in_set}"
+            )
+
+        # If no unlocked coordinates remain, return empty DataFrame with just muscle lengths
+        if not unlocked_coords:
+            logger.warning(
+                f"All coordinates for muscles {muscle_names} are locked. "
+                "Returning muscle lengths at default pose only."
+            )
+            # Return single row with default pose
+            if state is None:
+                state = self.osim_model.initSystem()
+            muscle_objs = [self.get_muscle(name) for name in muscle_names]
+            self.osim_model.realizePosition(state)
+            lengths = np.array(
+                [muscle.getLength(state) for muscle in muscle_objs]
+            ).reshape(1, -1)
+            return pl.DataFrame(lengths, schema=muscle_names)
+
+        # Compute muscle lengths across ROM for unlocked coordinates
         data = self.get_muscle_lengths_coordinates(
-            muscle_names, muscle_coords, min_points, state=state
+            muscle_names, unlocked_coords, min_points, state=state
         )
-        return pl.DataFrame(data, schema=muscle_coords + muscle_names)
+        return pl.DataFrame(data, schema=unlocked_coords + muscle_names)
 
     def get_all_muscle_lengths_rom(
-        self, min_points: int = 10
+        self, min_points: int = 10, use_parallel: bool = False, n_jobs: int = -1
     ) -> dict[str, pl.DataFrame]:
         """
         Analyze muscle length through the range of motion for all muscles.
@@ -859,6 +983,8 @@ class OsimGraph(BaseModel):
 
         Args:
             min_points: Minimum total number of points to sample
+            use_parallel: Whether to use parallel processing (default: False)
+            n_jobs: Number of parallel jobs (-1 uses all CPUs, default: -1)
 
         Returns:
             Dictionary mapping muscle names to DataFrames. Each DataFrame contains:
@@ -866,41 +992,98 @@ class OsimGraph(BaseModel):
             - A column for the muscle length values
 
         Note:
-            - Locked coordinates are automatically excluded with a warning
+            - Locked coordinates are automatically excluded using pre-computed cache
             - This can be computationally expensive for models with many muscles
-            - Consider using parallelization for large models (see TODO in code)
+            - Set use_parallel=True for faster computation on multi-core systems
 
         Example:
             >>> results = graph.get_all_muscle_lengths_rom(min_points=20)
             >>> soleus_df = results["soleus_r"]
             >>> print(soleus_df.head())
         """
-        # TODO: Subsets and/or parallelization to speed up computation
         # Create state once and reuse it for all muscle length calculations
         state = self.osim_model.initSystem()
-        
+
         results = {}
-        for coord_set, muscles in self.coords_muscles.items():
-            # check for locked coordinates
-            unlocked_coords = set(
-                [
-                    coord
-                    for coord in coord_set
-                    if not self.get_coordinate(coord).getDefaultLocked()
-                ]
-            )
-            if not unlocked_coords:
-                continue
-            diff = coord_set.difference(unlocked_coords)
-            if diff:
-                logger.warning(f"Locked coordinates {diff} for muscles {muscles}")
-            df = self.get_muscle_lengths_rom(
-                list(muscles), min_points=min_points, state=state
-            )
-            # Add the coordinate values and muscle lengths to the results dictionary for each muscle
-            results.update(
-                {muscle: df[list(unlocked_coords) + [muscle]] for muscle in muscles}
-            )
+
+        # Prepare coordinate sets for processing
+        coord_set_items = list(self.coords_muscles.items())
+
+        # Check if tqdm is available
+        has_tqdm = False
+        try:
+            from tqdm import tqdm as tqdm_progress
+
+            has_tqdm = True
+        except ImportError:
+            tqdm_progress = None
+            if len(coord_set_items) > 10:  # Only warn for larger jobs
+                logger.info("Install tqdm for progress bars: pip install tqdm")
+
+        if use_parallel and len(coord_set_items) > 1:
+            # Parallel processing requires model_path
+            if self.model_path is None:
+                raise ValueError(
+                    "Parallel processing requires model_path. "
+                    "Use OsimGraph.from_file() instead of direct instantiation, "
+                    "or set use_parallel=False."
+                )
+
+            # Parallel processing
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+
+            with ProcessPoolExecutor(
+                max_workers=n_jobs if n_jobs > 0 else None
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        _process_coord_set_parallel,
+                        self.model_path,
+                        coord_set,
+                        muscles,
+                        min_points,
+                        self.locked_coords,
+                    ): (coord_set, muscles)
+                    for coord_set, muscles in coord_set_items
+                }
+
+                future_iterator = as_completed(futures)
+                if has_tqdm and tqdm_progress is not None:
+                    future_iterator = tqdm_progress(
+                        future_iterator,
+                        total=len(futures),
+                        desc="Processing coordinate sets",
+                    )
+
+                for future in future_iterator:
+                    results.update(future.result())
+        else:
+            # Sequential processing
+            if has_tqdm and tqdm_progress is not None:
+                coord_iterator = tqdm_progress(
+                    coord_set_items, desc="Processing coordinate sets"
+                )
+            else:
+                coord_iterator = coord_set_items
+
+            for coord_set, muscles in coord_iterator:
+                # Filter unlocked coordinates using pre-computed cache
+                unlocked_coords = coord_set - self.locked_coords
+                if not unlocked_coords:
+                    continue
+
+                diff = coord_set.difference(unlocked_coords)
+                if diff:
+                    logger.warning(f"Locked coordinates {diff} for muscles {muscles}")
+
+                df = self.get_muscle_lengths_rom(
+                    list(muscles), min_points=min_points, state=state
+                )
+                # Add the coordinate values and muscle lengths to the results dictionary for each muscle
+                results.update(
+                    {muscle: df[list(unlocked_coords) + [muscle]] for muscle in muscles}
+                )
+
         return results
 
     def get_muscle_lengths_from_data(
