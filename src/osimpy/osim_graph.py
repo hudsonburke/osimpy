@@ -7,6 +7,7 @@ import sys
 import numpy as np
 import math
 import logging
+import polars as pl
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
