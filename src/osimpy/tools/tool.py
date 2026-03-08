@@ -1,12 +1,16 @@
 import json
 import hashlib
-from loguru import logger
 from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, Field, FilePath, DirectoryPath
 
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # TODO: Should the Settings be embedded in the Result?
+
 
 class ToolResult(BaseModel):
     """Base class for tool execution results.
@@ -16,16 +20,18 @@ class ToolResult(BaseModel):
     """
 
     success: bool = Field(description="Whether the tool completed successfully")
-    results_directory: DirectoryPath = Field(description="Directory containing output files")
+    results_directory: DirectoryPath = Field(
+        description="Directory containing output files"
+    )
 
     start_time: datetime = Field(description="When the tool execution started")
     end_time: datetime = Field(description="When the tool execution finished")
-    run_time: float = Field(description="Execution time in seconds")
 
     warnings: list[str] = Field(default_factory=list, description="Warning messages")
     errors: list[str] = Field(default_factory=list, description="Error messages")
 
     setup_file: FilePath = Field(description="Path to the tool setup XML file")
+
 
 class ToolSettings(BaseModel):
     """Base class for OpenSim tool settings.
@@ -34,7 +40,9 @@ class ToolSettings(BaseModel):
     """
 
     model_file: FilePath = Field(description="Path to OpenSim model file (.osim)")
-    results_directory: DirectoryPath = Field(description="Directory for results and setup files")
+    results_directory: DirectoryPath = Field(
+        description="Directory for results and setup files"
+    )
 
     def create_tool(self):
         """Create and configure the OpenSim tool instance.
@@ -83,7 +91,7 @@ class ToolSettings(BaseModel):
     #     finally:
     #         end_time = datetime.now()
 
-    #     return 
+    #     return
 
     def save_setup(self, filepath: str | None = None) -> str:
         """Save tool setup to XML file with model file path.

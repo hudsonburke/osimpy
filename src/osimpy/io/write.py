@@ -1,12 +1,16 @@
 """OpenSim export functionality."""
 
 from typing import Any
-from loguru import logger
 from pydantic import BaseModel
 import polars as pl
 import numpy as np
 import opensim as osim
 from ..utils import get_unit_conversion
+
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def export_trc(

@@ -1,13 +1,15 @@
-import polars as pl
 from itertools import product
 from collections import deque, defaultdict
 from pydantic import BaseModel, model_validator, Field, field_validator, ConfigDict
 from typing import TypeVar, Any, Literal
 import opensim as osim
 import sys
-from loguru import logger
 import numpy as np
 import math
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Type variable for OpenSim component types
 T = TypeVar("T")

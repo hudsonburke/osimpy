@@ -1,26 +1,24 @@
-from loguru import logger
 import opensim as osim
 from datetime import datetime
 from pathlib import Path
-from pydantic import Field, ConfigDict
+from pydantic import Field
 from .tool import ToolSettings, ToolResult
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 class ScaleResult(ToolResult):
     """Result from Scale Tool analysis.
 
     Attributes
     ----------
-    output_model_file : str
+    scaled_model_file : str
         Path to the scaled model file
-    output_marker_set : str
-        Path to the output marker set file
-    input_marker_file : str
-        Path to the input marker file used for scaling
     """
 
-    output_model_file: str = Field(description="Path to scaled model file")
-    output_marker_set: str | None = Field(None, description="Path to output marker set")
-    input_marker_file: str = Field(description="Path to input marker file")
+    scaled_model_file: str = Field(description="Path to scaled model file")
 
 
 class ScaleSettings(ToolSettings):
@@ -29,8 +27,6 @@ class ScaleSettings(ToolSettings):
     Configure and run the scale tool to scale a generic model to a subject's
     anthropometry based on marker data.
     """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     marker_set_path: str = Field(description="Path to the marker set file")
     marker_file: str = Field(description="Path to marker data file for scaling (.trc)")
@@ -141,16 +137,12 @@ class ScaleSettings(ToolSettings):
             end_time = datetime.now()
 
         return ScaleResult(
-            success=success,
-            setup_file=setup_file,
-            results_directory=self.results_directory,
-            start_time=start_time,
-            end_time=end_time,
-            run_time=(end_time - start_time).total_seconds(),
+            scaled_model_file=self.output_model_file,
+            setup_file=str(setup_file),
             warnings=warnings,
             errors=errors,
-            output_model_file=self.output_model_file,
-            output_marker_set=None,  # TODO: Get from tool if generated
-            input_marker_file=self.marker_file,
-            settings_dict=self.to_dict(),
+            success=success,
+            start_time=start_time,
+            end_time=end_time,
         )
+
