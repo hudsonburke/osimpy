@@ -2,7 +2,6 @@ from .io import (
     export_trc,
     export_mot,
     export_external_loads,
-    export_force_platforms,
     OpenSimExternalForce,
     sto_to_df,
 )
@@ -30,7 +29,6 @@ __all__ = [
     "export_trc",
     "export_mot",
     "export_external_loads",
-    "export_force_platforms",
     "OpenSimExternalForce",
     "sto_to_df",
     "get_unit_conversion",

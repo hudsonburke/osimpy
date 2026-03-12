@@ -1,9 +1,8 @@
 from itertools import product
 from collections import deque, defaultdict
 from pydantic import BaseModel, model_validator, Field, field_validator, ConfigDict
-from typing import TypeVar, Any, Literal
+from typing import TypeVar, Any
 import opensim as osim
-import sys
 import numpy as np
 import math
 import logging
@@ -14,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 # Type variable for OpenSim component types
 T = TypeVar("T")
-
 
 def _process_coord_set_parallel(
     model_path: str,
@@ -191,15 +189,10 @@ class OsimGraph(BaseModel):
         default_factory=lambda: defaultdict(set),
         description="Coordinate name -> muscle names actuating it (reverse index)",
     )
-    log_level: Literal[
-        "TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"
-    ] = Field(default="ERROR", description="Logging level for the graph operations")
 
     @model_validator(mode="after")
     def build_graph(self):
         """Build all graph structures after model initialization."""
-        logger.remove()
-        logger.add(sys.stderr, level=self.log_level)
         self.create_rigid_graph()
         self.create_muscle_graph()
         self.create_marker_graph()

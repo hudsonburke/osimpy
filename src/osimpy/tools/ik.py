@@ -1,11 +1,10 @@
 import opensim as osim
-from datetime import datetime
-from pathlib import Path
-from pydantic import Field, ConfigDict, FilePath, NewPath, BaseModel
+from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
+import logging
 
-class IKTask(BaseModel):
-    pass
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class IKResult(ToolResult):
@@ -13,106 +12,91 @@ class IKResult(ToolResult):
 
     Attributes
     ----------
-    output_motion_file : str
+    motion_file : FilePath
         Path to the output motion (.mot) file containing computed coordinates
-
     """
 
-    motion_file: FilePath = Field(description="Path to output motion file (.mot)")
+    motion_file: str = Field(description="Name of output motion file (.mot)")
 
 
-class IKSettings(ToolSettings):
+class IKSettings(ToolSettings[IKResult]):
     """Inverse Kinematics tool settings.
 
     Configure and run inverse kinematics analysis to compute joint angles
     from marker trajectories.
+
+    If ``setup_file`` is provided, the InverseKinematicsTool is initialised
+    from that XML template (preserving IKTaskSet marker weights, constraint
+    weight, accuracy, etc.) and then individual fields are applied on top.
+    Otherwise a blank InverseKinematicsTool is created.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    marker_path: FilePath = Field(description="Path to marker data file (.trc)")
+    output_motion_file: str = Field(description="Name of output motion file (.mot)")
 
-    marker_file: FilePath = Field(description="Path to marker data file (.trc)")
-    output_motion_file: NewPath = Field(description="Path for output motion file (.mot)")
+    task_set_path: FilePath | None = Field(
+        None, description="IK task set for tracking (overrides template)"
+    )
+    constraint_weight: float | None = Field(
+        None,
+        description="Weight for kinematic constraints (None = use template default)",
+    )
+    accuracy: float | None = Field(
+        None, description="Convergence accuracy (None = use template default)"
+    )
+    report_marker_locations: bool | None = Field(
+        None,
+        description="Report marker locations in output (None = use template default)",
+    )
 
-    task_set: osim.IKTaskSet | None = Field(
-        None, description="IK task set for tracking"
-    )
-    constraint_weight: float = Field(
-        1.0, description="Weight for kinematic constraints"
-    )
-    accuracy: float = Field(1e-5, description="Convergence accuracy")
-    report_marker_locations: bool = Field(
-        False, description="Report marker locations in output"
-    )
+    def get_result_type(self) -> type[IKResult]:
+        return IKResult
+
+    def get_result_kwargs(self) -> dict[str, str]:
+        return {"motion_file": self.output_motion_file}
 
     def create_tool(self) -> osim.InverseKinematicsTool:
         """Create and configure an InverseKinematicsTool instance.
+
+        If ``setup_file`` is set, the tool is loaded from the template XML
+        first (preserving IKTaskSet, constraint weight, accuracy, etc.).
+        Individual settings are then applied on top.
 
         Returns
         -------
         InverseKinematicsTool
             Configured InverseKinematicsTool instance
         """
-        tool = osim.InverseKinematicsTool()
+        # --- Load from template or create blank ---
+        if self.setup_path is not None:
+            tool = osim.InverseKinematicsTool(str(self.setup_path.resolve()))
+        else:
+            tool = osim.InverseKinematicsTool()
 
-        tool.set_model_file(str(self.model_file))
-        tool.setResultsDir(str(self.results_directory))
-        tool.setMarkerDataFileName(str(self.marker_file))
-        tool.setOutputMotionFileName(str(self.output_motion_file))
+        rel_model_path = str(self.get_relative_path(self.model_path))
+        rel_marker_path = str(self.get_relative_path(self.marker_path))
+        rel_results_dir = str(self.get_relative_path(self.results_directory))
 
-        if self.task_set is not None:
-            tool.set_IKTaskSet(self.task_set)
+        tool.set_model_file(rel_model_path)
+        tool.setResultsDir(rel_results_dir)
+        tool.setMarkerDataFileName(rel_marker_path)
+        tool.setOutputMotionFileName(self.output_motion_file)
+
+        # Override task set only if explicitly provided
+        if self.task_set_path is not None:
+            rel_task_set_path = str(self.get_relative_path(self.task_set_path))
+            tool.set_IKTaskSet(rel_task_set_path)
+
+        # Override constraint weight only if explicitly provided
+        if self.constraint_weight is not None:
+            tool.set_constraint_weight(self.constraint_weight)
+
+        # Override accuracy only if explicitly provided
+        if self.accuracy is not None:
+            tool.set_accuracy(self.accuracy)
+
+        # Override report_marker_locations only if explicitly provided
+        if self.report_marker_locations is not None:
+            tool.set_report_marker_locations(self.report_marker_locations)
 
         return tool
-    
-    def run(self) -> IKResult:
-        """Execute IK analysis using XML-based workflow.
-
-        Save settings to XML, load tool from XML (which loads the model), then run.
-
-        Returns
-        -------
-        IKResult
-            Structured IK results with motion file path and metadata
-        """
-        # Ensure results directory exists
-        results_dir = Path(self.results_directory)
-        results_dir.mkdir(parents=True, exist_ok=True)
-
-        warnings = []
-        errors = []
-        success = False
-        start_time = datetime.now()
-
-        try:
-            # Create and configure tool (for XML generation)
-            tool = self.create_tool()
-
-            # Save setup XML with model_file injected
-            setup_file = self.save_setup()
-
-            # Recreate tool from XML file (this loads the model)
-            tool = osim.InverseKinematicsTool(setup_file, True)  # True = load model
-
-            # Execute tool
-            tool.run()
-            success = True
-
-        except Exception as e:
-            errors.append(str(e))
-            setup_file = str(results_dir / "failed_setup.xml")
-            raise RuntimeError(f"Tool execution failed: {e}") from e
-
-        finally:
-            end_time = datetime.now()
-
-        return IKResult(
-            success=success,
-            setup_file=Path(setup_file),
-            results_directory=self.results_directory,
-            start_time=start_time,
-            end_time=end_time,
-            run_time=(end_time - start_time).total_seconds(),
-            warnings=warnings,
-            errors=errors,
-            motion_file=self.output_motion_file,
-        )

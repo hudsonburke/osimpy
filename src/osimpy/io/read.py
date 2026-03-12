@@ -1,6 +1,7 @@
 """OpenSim file reading functionality."""
 
 import polars as pl
+import polars.selectors as cs
 
 
 def sto_to_df(file_path: str) -> tuple[pl.DataFrame, dict[str, str]]:
@@ -45,10 +46,5 @@ def sto_to_df(file_path: str) -> tuple[pl.DataFrame, dict[str, str]]:
         file_path, separator="\t", skip_lines=lines_to_skip, truncate_ragged_lines=True
     )
     # Strip whitespace from columns
-    df = df.with_columns(
-        [
-            pl.col(col).cast(pl.String).str.strip_chars().cast(pl.Float64)
-            for col in df.columns
-        ]
-    )
+    df = df.with_columns(cs.string().str.strip_chars().cast(pl.Float64, strict=False))
     return df, file_metadata

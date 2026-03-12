@@ -1,23 +1,34 @@
 import opensim as osim
-from datetime import datetime
 from pathlib import Path
-from pydantic import Field, FilePath, NewPath
+from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 class IDResult(ToolResult):
     """Result from Inverse Dynamics analysis."""
 
     forces_file: FilePath = Field(description="Path to output forces file (.sto)")
 
-class IDSettings(ToolSettings):
+
+class IDSettings(ToolSettings[IDResult]):
     """Inverse Dynamics tool settings.
 
     Configure and run inverse dynamics analysis to compute generalized forces
     from joint kinematics and external forces.
+
+    If ``setup_file`` is provided, the InverseDynamicsTool is initialised
+    from that XML template first and then individual fields are applied on
+    top.  Otherwise a blank InverseDynamicsTool is created.
     """
 
-    coordinates_file: FilePath = Field(description="Path to coordinates file (.mot) from IK")
-    output_forces_file: NewPath = Field(description="Path for output forces file (.sto)")
+    coordinates_path: FilePath = Field(
+        description="Path to coordinates file (.mot) from IK"
+    )
+    output_forces_file: str = Field(description="Name of output forces file (.sto)")
 
     # Time range
     initial_time: float = Field(
@@ -28,7 +39,7 @@ class IDSettings(ToolSettings):
     )
 
     # Optional settings
-    external_loads_file: FilePath | None = Field(
+    external_loads_path: FilePath | None = Field(
         None, description="Path to external loads XML file"
     )
     lowpass_cutoff_frequency: float = Field(
@@ -39,28 +50,46 @@ class IDSettings(ToolSettings):
         default_factory=list, description="List of force names to exclude from analysis"
     )
 
+    def get_result_type(self) -> type[IDResult]:
+        return IDResult
+
+    def get_result_kwargs(self) -> dict[str, Path]:
+        return {"forces_file": Path(self.output_forces_file)}
+
     def create_tool(self) -> osim.InverseDynamicsTool:
         """Create and configure an InverseDynamicsTool instance.
+
+        If ``setup_file`` is set, the tool is loaded from the template XML
+        first.  Individual settings are then applied on top.
 
         Returns
         -------
         InverseDynamicsTool
             Configured ID tool ready for execution
         """
-        tool = osim.InverseDynamicsTool()
+        # --- Load from template or create blank ---
+        if self.setup_path is not None:
+            tool = osim.InverseDynamicsTool(str(self.setup_path.resolve()))
+        else:
+            tool = osim.InverseDynamicsTool()
 
-        tool.setModelFileName(str(self.model_file))
+        rel_model_path = str(self.get_relative_path(self.model_path))
+
+        tool.setModelFileName(rel_model_path)
 
         # Set results directory
         tool.setResultsDir(str(self.results_directory))
 
         # Set external loads if provided
-        if self.external_loads_file:
-            tool.setExternalLoadsFileName(str(self.external_loads_file))
+        if self.external_loads_path:
+            rel_external_loads_path = str(
+                self.get_relative_path(self.external_loads_path)
+            )
+            tool.setExternalLoadsFileName(rel_external_loads_path)
 
-        # Set coordinates and output files
-        tool.setCoordinatesFileName(str(self.coordinates_file))
-        tool.setOutputGenForceFileName(str(self.output_forces_file))
+        rel_coordinates_path = str(self.get_relative_path(self.coordinates_path))
+        tool.setCoordinatesFileName(rel_coordinates_path)
+        tool.setOutputGenForceFileName(self.output_forces_file)
 
         # Set filtering
         if self.lowpass_cutoff_frequency > 0:
@@ -75,7 +104,7 @@ class IDSettings(ToolSettings):
 
         # Set time range (auto-detect from coordinates file if needed)
         if self.initial_time == -1.0 or self.final_time == -1.0:
-            sto = osim.Storage(str(self.coordinates_file))
+            sto = osim.Storage(str(self.coordinates_path.resolve()))
             if self.initial_time == -1.0:
                 tool.setStartTime(sto.getFirstTime())
             else:
@@ -89,56 +118,3 @@ class IDSettings(ToolSettings):
             tool.setEndTime(self.final_time)
 
         return tool
-
-    def run(self) -> IDResult:
-        """Execute ID analysis using XML-based workflow.
-
-        Save settings to XML, load tool from XML (which loads the model), then run.
-
-        Returns
-        -------
-        IDResult
-            Structured ID results with forces file path and metadata
-        """
-        # Ensure results directory exists
-        results_dir = Path(self.results_directory)
-        results_dir.mkdir(parents=True, exist_ok=True)
-
-        warnings = []
-        errors = []
-        success = False
-        start_time = datetime.now()
-
-        try:
-            # Create and configure tool (for XML generation)
-            tool = self.create_tool()
-
-            # Save setup XML with model_file injected
-            setup_file = self.save_setup()
-
-            # Recreate tool from XML file (this loads the model)
-            tool = osim.InverseDynamicsTool(setup_file, True)  # True = load model
-
-            # Execute tool
-            tool.run()
-            success = True
-
-        except Exception as e:
-            errors.append(str(e))
-            setup_file = str(results_dir / "failed_setup.xml")
-            raise RuntimeError(f"Tool execution failed: {e}") from e
-
-        finally:
-            end_time = datetime.now()
-
-        return IDResult(
-            success=success,
-            setup_file=Path(setup_file),
-            results_directory=self.results_directory,
-            start_time=start_time,
-            end_time=end_time,
-            run_time=(end_time - start_time).total_seconds(),
-            warnings=warnings,
-            errors=errors,
-            forces_file=self.output_forces_file,
-        )

@@ -6,11 +6,79 @@ import polars as pl
 import numpy as np
 import opensim as osim
 from ..utils import get_unit_conversion
-
+from .metadata import TRCMetadata, STOMetadata, MOTMetadata
 import logging
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# TRC is very similar to TSV -> What can I leverage for this?
+# TODO: Version that bypasses the OpenSim API and writes the TRC file directly from the tensor, for faster export of large datasets. This will require careful handling of the TRC file format, including headers and metadata, but can be much faster than iterating through frames in Python and calling OpenSim's C++ API for each row.
+def write_trc(filepath: Path, data: np.ndarray, metadata: TRCMetadata) -> None:
+    with open(filepath) as f:
+        f.write(f"PathFileType\t{metadata.PathFileType}\t{metadata.FileName}\n")
+
+
+def write_sto(
+    filepath: Path, data: pl.DataFrame, metadata: STOMetadata | MOTMetadata
+) -> None:
+    with open(filepath) as f:
+        f.write(f"nRows\t{metadata.nRows}\n")
+        f.write(f"nColumns\t{metadata.nColumns}\n")
+        f.write(f"inDegrees\t{metadata.inDegrees}\n")
+        # if "comments" in metadata.dict():
+        #     f.write("\n".join(f"{comment}" for comment in metadata["comments"]) + "\n")
+        # Write column labels
+        f.write("\t".join(data.columns) + "\n")
+        # Write data rows
+        for row in data.iter_rows(named=False):
+            f.write("\t".join(str(val) for val in row) + "\n")
+
+
+def export_tensor_as_trc(
+    filepath: str,
+    markers_tensor: np.ndarray,  # Expected shape: (Frames, Markers, 3)
+    marker_names: list[str],
+    time: np.ndarray,
+    rate: float,
+    units: str,
+    output_units: str | None = None,
+    rotation: np.ndarray = np.eye(3),
+) -> None:
+    """Export marker data to TRC file format used by OpenSim."""
+
+    num_frames, _, dims = markers_tensor.shape
+    assert dims == 3, "All marker coordinates must be 3D"
+    assert num_frames == len(time), "Frames in tensor must match time array length"
+
+    conversion_factor = 1.0
+    if output_units is not None and units != output_units:
+        logger.warning(
+            f"Output units {output_units} do not match points units {units}. Converting coordinates."
+        )
+        conversion_factor = get_unit_conversion(units, output_units)
+
+    processed_tensor = (markers_tensor @ rotation.T) * conversion_factor
+
+    # Set up OpenSim Table
+    table = osim.TimeSeriesTableVec3()
+    table.setColumnLabels(marker_names)
+
+    rate = float(rate.item()) if isinstance(rate, np.ndarray) else float(rate)
+    table.addTableMetaDataString(
+        "Units", units if output_units is None else output_units
+    )
+    table.addTableMetaDataString("DataRate", str(rate))
+
+    # Iterating is required by the osim C++ API
+    for i in range(num_frames):
+        row = [osim.Vec3(*coords) for coords in processed_tensor[i]]
+        table.appendRow(time[i], osim.RowVectorVec3(row))
+
+    adapter = osim.TRCFileAdapter()
+    adapter.write(table, filepath)
 
 
 def export_trc(
@@ -170,19 +238,3 @@ def export_external_loads(
     if datafile_name is not None:
         ext_loads.setDataFileName(datafile_name)
     ext_loads.printToXML(filepath)
-
-
-def export_force_platforms(
-    output_dir: str,
-    rotation: np.ndarray = np.eye(3),
-    mot_filename: str = "forces.mot",
-    unit_force: str = "N",
-    unit_position: str = "m",
-    unit_moment: str = "Nm",
-    metadata: dict[str, Any] = {},
-) -> None:
-    """
-    Export force plate metadata to OpenSim ExternalLoads .xml file and the data to a .mot file.
-    """
-
-    ext_loads = osim.ExternalLoads()
