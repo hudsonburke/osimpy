@@ -70,6 +70,14 @@ class ToolSettings(BaseModel, Generic[ResultT]):
         "When set, the tool is loaded from this file first, "
         "then individual settings override the template values.",
     )
+
+    initial_time: float | None = Field(
+        None, description="Initial time for the analysis (None = load from input data)"
+    )
+    final_time: float | None = Field(
+        None, description="Final time for the simulation (None = load from input data)"
+    )
+
     model_path: FilePath = Field(description="Path to OpenSim model file (.osim)")
     results_directory: DirectoryPath = Field(
         description="Directory for results and setup files"

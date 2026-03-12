@@ -1,7 +1,6 @@
 """OpenSim export functionality."""
 
 from typing import Any
-from pydantic import BaseModel
 import polars as pl
 import numpy as np
 import opensim as osim
@@ -9,32 +8,32 @@ from ..utils import get_unit_conversion
 from .metadata import TRCMetadata, STOMetadata, MOTMetadata
 import logging
 from pathlib import Path
+from dataclasses import dataclass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 # TRC is very similar to TSV -> What can I leverage for this?
-# TODO: Version that bypasses the OpenSim API and writes the TRC file directly from the tensor, for faster export of large datasets. This will require careful handling of the TRC file format, including headers and metadata, but can be much faster than iterating through frames in Python and calling OpenSim's C++ API for each row.
+# TODO: Version that bypasses the OpenSim API and writes the TRC file directly from the tensor, for faster export
 def write_trc(filepath: Path, data: np.ndarray, metadata: TRCMetadata) -> None:
     with open(filepath) as f:
         f.write(f"PathFileType\t{metadata.PathFileType}\t{metadata.FileName}\n")
 
 
 def write_sto(
-    filepath: Path, data: pl.DataFrame, metadata: STOMetadata | MOTMetadata
+    filepath: Path, data: np.ndarray, metadata: STOMetadata | MOTMetadata
 ) -> None:
     with open(filepath) as f:
+        # for field_name, field_value in metadata.model_dump().items():
+        #     f.write(f"{field_name}\t{field_value}\n")
         f.write(f"nRows\t{metadata.nRows}\n")
         f.write(f"nColumns\t{metadata.nColumns}\n")
         f.write(f"inDegrees\t{metadata.inDegrees}\n")
+        # TODO
         # if "comments" in metadata.dict():
         #     f.write("\n".join(f"{comment}" for comment in metadata["comments"]) + "\n")
         # Write column labels
-        f.write("\t".join(data.columns) + "\n")
-        # Write data rows
-        for row in data.iter_rows(named=False):
-            f.write("\t".join(str(val) for val in row) + "\n")
 
 
 def export_tensor_as_trc(
@@ -50,8 +49,10 @@ def export_tensor_as_trc(
     """Export marker data to TRC file format used by OpenSim."""
 
     num_frames, _, dims = markers_tensor.shape
-    assert dims == 3, "All marker coordinates must be 3D"
-    assert num_frames == len(time), "Frames in tensor must match time array length"
+    if dims != 3:
+        raise ValueError("All marker coordinates must be 3D")
+    if num_frames != len(time):
+        raise ValueError("Frames in tensor must match time array length")
 
     conversion_factor = 1.0
     if output_units is not None and units != output_units:
@@ -66,7 +67,6 @@ def export_tensor_as_trc(
     table = osim.TimeSeriesTableVec3()
     table.setColumnLabels(marker_names)
 
-    rate = float(rate.item()) if isinstance(rate, np.ndarray) else float(rate)
     table.addTableMetaDataString(
         "Units", units if output_units is None else output_units
     )
@@ -77,70 +77,6 @@ def export_tensor_as_trc(
         row = [osim.Vec3(*coords) for coords in processed_tensor[i]]
         table.appendRow(time[i], osim.RowVectorVec3(row))
 
-    adapter = osim.TRCFileAdapter()
-    adapter.write(table, filepath)
-
-
-def export_trc(
-    filepath: str,
-    markers: dict[str, np.ndarray],
-    time: np.ndarray,
-    rate: float,
-    units: str,
-    output_units: str | None = None,
-    rotation: np.ndarray = np.eye(3),
-) -> None:
-    """
-    Export marker data to TRC file format used by OpenSim
-    """
-    # Markers is expected to be a dict of marker name to Nx3 numpy array of coordinates
-    num_frames = len(time)
-    if any(len(coords) != num_frames for coords in markers.values()):
-        raise ValueError(
-            "All markers must have the same number of frames as the time array"
-        )
-    assert all(coords.shape[1] == 3 for coords in markers.values()), (
-        "All marker coordinates must be 3D"
-    )
-
-    table = osim.TimeSeriesTableVec3()
-    marker_names = list(markers.keys())
-    table.setColumnLabels(marker_names)
-    conversion_factor = 1.0
-    if output_units is not None and units != output_units:
-        logger.warning(
-            f"Output units {output_units} do not match points units {units}. Converting coordinates."
-        )
-        conversion_factor = get_unit_conversion(units, output_units)
-
-    # Ensure rate is a scalar (extract from numpy array if needed)
-    if isinstance(rate, np.ndarray):
-        rate = float(rate.item())
-    else:
-        rate = float(rate)
-
-    table.addTableMetaDataString(
-        "Units", units if output_units is None else output_units
-    )
-    table.addTableMetaDataString("DataRate", str(rate))
-    for frame in range(num_frames):
-        row = []
-        for marker_name, coords in markers.items():
-            in_coords = coords[frame]
-            if in_coords is not None:
-                coords_rotated = np.array(
-                    rotation @ np.array(in_coords).T
-                ).T  # Apply rotation if needed
-                coords_converted = (
-                    coords_rotated * conversion_factor
-                )  # Convert coordinates if needed
-            else:
-                coords_converted = np.array([np.nan, np.nan, np.nan])
-            row.append(
-                osim.Vec3(coords_converted[0], coords_converted[1], coords_converted[2])
-            )
-        time_val = time[frame]
-        table.appendRow(time_val, osim.RowVectorVec3(row))
     adapter = osim.TRCFileAdapter()
     adapter.write(table, filepath)
 
@@ -195,7 +131,8 @@ def export_mot(
     mot_file.write(mot_table, filepath)
 
 
-class OpenSimExternalForce(BaseModel):
+@dataclass
+class OpenSimExternalForce:
     name: str
     applied_to_body: str
     force_expressed_in_body: str = "ground"
@@ -205,23 +142,24 @@ class OpenSimExternalForce(BaseModel):
     torque_identifier: str = r"moment_"
     data_source_name: str | None = None
 
-    def to_opensim(self) -> osim.ExternalForce:
-        """
-        Convert to OpenSim ExternalForce object.
-        """
-        ext_force = osim.ExternalForce()
-        ext_force.setName(self.name)
-        ext_force.setAppliedToBodyName(self.applied_to_body)
-        ext_force.setForceExpressedInBodyName(self.force_expressed_in_body)
-        ext_force.setPointExpressedInBodyName(self.point_expressed_in_body)
-        ext_force.setForceIdentifier(self.force_identifier)
-        ext_force.setPointIdentifier(self.point_identifier)
-        ext_force.setTorqueIdentifier(self.torque_identifier)
 
-        if self.data_source_name is not None:
-            ext_force.set_data_source_name(self.data_source_name)
+def force_to_opensim(force: OpenSimExternalForce) -> osim.ExternalForce:
+    """
+    Convert to OpenSim ExternalForce object.
+    """
+    ext_force = osim.ExternalForce()
+    ext_force.setName(force.name)
+    ext_force.setAppliedToBodyName(force.applied_to_body)
+    ext_force.setForceExpressedInBodyName(force.force_expressed_in_body)
+    ext_force.setPointExpressedInBodyName(force.point_expressed_in_body)
+    ext_force.setForceIdentifier(force.force_identifier)
+    ext_force.setPointIdentifier(force.point_identifier)
+    ext_force.setTorqueIdentifier(force.torque_identifier)
 
-        return ext_force
+    if force.data_source_name is not None:
+        ext_force.set_data_source_name(force.data_source_name)
+
+    return ext_force
 
 
 def export_external_loads(
@@ -234,7 +172,7 @@ def export_external_loads(
     """
     ext_loads = osim.ExternalLoads()
     for force in external_forces:
-        ext_loads.cloneAndAppend(force.to_opensim())
+        ext_loads.cloneAndAppend(force_to_opensim(force))
     if datafile_name is not None:
         ext_loads.setDataFileName(datafile_name)
     ext_loads.printToXML(filepath)

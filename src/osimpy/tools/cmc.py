@@ -73,10 +73,6 @@ class CMCSettings(ToolSettings[CMCResult]):
     )
 
     # Parameters
-    initial_time: float | None = Field(
-        None, description="Initial time for the simulation"
-    )
-    final_time: float | None = Field(None, description="Final time for the simulation")
     solve_for_equilibrium_for_auxiliary_states: bool = Field(
         True,
         description="Compute equilibrium for states other than coords/speeds",
@@ -170,6 +166,21 @@ class CMCSettings(ToolSettings[CMCResult]):
         tool.setModelFilename(rel_model_path)
 
         tool.setResultsDir(rel_results_dir)
+
+        if self.initial_time is None or self.final_time is None:
+            try:
+                if self.desired_kinematics_path is not None:
+                    sto = osim.Storage(str(self.desired_kinematics_path.resolve()))
+                    self.initial_time = self.initial_time or sto.getFirstTime()
+                    self.final_time = self.final_time or sto.getLastTime()
+                elif self.desired_points_path is not None:
+                    trc = osim.MarkerData(str(self.desired_points_path.resolve()))
+                    self.initial_time = self.initial_time or trc.getStartFrameTime()
+                    self.final_time = self.final_time or trc.getLastFrameTime()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load data to set the time range: {e}"
+                ) from e
 
         tool.setInitialTime(self.initial_time)
         tool.setFinalTime(self.final_time)

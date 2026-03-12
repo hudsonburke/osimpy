@@ -51,10 +51,6 @@ class ScaleSettings(ToolSettings[ScaleResult]):
         None,
         description="Subject's total mass (kg). If None, uses generic model mass",
     )
-    time_range: tuple[float, float] | None = Field(
-        None,
-        description="Time range (start, end) for marker data to use in scaling",
-    )
     use_marker_placer: bool = Field(
         True, description="Whether to run the MarkerPlacer tool after scaling"
     )
@@ -107,20 +103,18 @@ class ScaleSettings(ToolSettings[ScaleResult]):
             model_scaler.setOutputScaleFileName(self.output_scale_file)
 
         time_array = osim.ArrayDouble()
-        if self.time_range is None:
+        if self.initial_time is None or self.final_time is None:
             try:
                 trc_data = osim.MarkerData(str(self.marker_path.resolve()))
-                self.time_range = (
-                    trc_data.getStartFrameTime(),
-                    trc_data.getLastFrameTime(),
-                )
+                self.initial_time = self.initial_time or trc_data.getStartFrameTime()
+                self.final_time = self.final_time or trc_data.getLastFrameTime()
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load marker data from '{self.marker_path}': {e}"
                 ) from e
 
-        time_array.set(0, self.time_range[0])
-        time_array.set(1, self.time_range[1])
+        time_array.set(0, self.initial_time)
+        time_array.set(1, self.final_time)
         model_scaler.setTimeRange(time_array)
 
         if self.scale_factors:
@@ -148,6 +142,6 @@ class ScaleSettings(ToolSettings[ScaleResult]):
             marker_placer.setApply(True)
             marker_placer.setMarkerFileName(rel_marker_path)
             marker_placer.setOutputModelFileName(self.output_model_file)
-            marker_placer.setTimeRange(model_scaler.getTimeRange())
+            marker_placer.setTimeRange(time_array)
 
         return tool

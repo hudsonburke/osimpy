@@ -1,6 +1,8 @@
 from pydantic import BaseModel, model_validator
 from typing import Literal
 
+# TODO: Should these just be dataclasses instead of Pydantic?
+
 
 class BaseMetadata(BaseModel):
     name: str = ""

@@ -82,6 +82,19 @@ class IKSettings(ToolSettings[IKResult]):
         tool.setMarkerDataFileName(rel_marker_path)
         tool.setOutputMotionFileName(self.output_motion_file)
 
+        if self.initial_time is None or self.final_time is None:
+            try:
+                trc_data = osim.MarkerData(str(self.marker_path.resolve()))
+                self.initial_time = self.initial_time or trc_data.getStartFrameTime()
+                self.final_time = self.final_time or trc_data.getLastFrameTime()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load marker data from '{self.marker_path}': {e}"
+                ) from e
+
+        tool.setStartTime(self.initial_time)
+        tool.setEndTime(self.final_time)
+
         # Override task set only if explicitly provided
         if self.task_set_path is not None:
             rel_task_set_path = str(self.get_relative_path(self.task_set_path))

@@ -30,14 +30,6 @@ class IDSettings(ToolSettings[IDResult]):
     )
     output_forces_file: str = Field(description="Name of output forces file (.sto)")
 
-    # Time range
-    initial_time: float = Field(
-        -1.0, description="Initial time for analysis (-1 = auto from file)"
-    )
-    final_time: float = Field(
-        -1.0, description="Final time for analysis (-1 = auto from file)"
-    )
-
     # Optional settings
     external_loads_path: FilePath | None = Field(
         None, description="Path to external loads XML file"
@@ -102,19 +94,17 @@ class IDSettings(ToolSettings[IDResult]):
                 exclude.append(force)
             tool.setExcludedForces(exclude)
 
-        # Set time range (auto-detect from coordinates file if needed)
-        if self.initial_time == -1.0 or self.final_time == -1.0:
-            sto = osim.Storage(str(self.coordinates_path.resolve()))
-            if self.initial_time == -1.0:
-                tool.setStartTime(sto.getFirstTime())
-            else:
-                tool.setStartTime(self.initial_time)
-            if self.final_time == -1.0:
-                tool.setEndTime(sto.getLastTime())
-            else:
-                tool.setEndTime(self.final_time)
-        else:
-            tool.setStartTime(self.initial_time)
-            tool.setEndTime(self.final_time)
+        if self.initial_time is None or self.final_time is None:
+            try:
+                sto = osim.Storage(str(self.coordinates_path.resolve()))
+                self.initial_time = self.initial_time or sto.getFirstTime()
+                self.final_time = self.final_time or sto.getLastTime()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load coordinate data from '{self.coordinates_path}': {e}"
+                ) from e
+
+        tool.setStartTime(self.initial_time)
+        tool.setEndTime(self.final_time)
 
         return tool
