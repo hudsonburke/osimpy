@@ -2,6 +2,7 @@ import opensim as osim
 from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,9 @@ class ScaleResult(ToolResult):
         Path to the scaled model file
     """
 
-    scaled_model_file: FilePath = Field(description="Path to scaled model file")
+    scaled_model_file: FilePath | None = Field(
+        None, description="Path to scaled model file"
+    )
 
 
 class ScaleSettings(ToolSettings[ScaleResult]):
@@ -54,11 +57,8 @@ class ScaleSettings(ToolSettings[ScaleResult]):
         True, description="Whether to run the MarkerPlacer tool after scaling"
     )
 
-    def get_result_type(self) -> type[ScaleResult]:
-        return ScaleResult
-
-    def get_result_kwargs(self) -> dict[str, str]:
-        return {"scaled_model_file": self.output_model_file}
+    def resolve_output_files(self) -> dict[str, Path | None]:
+        return {"scaled_model_file": self._resolve_output(self.output_model_file)}
 
     def create_tool(self) -> osim.ScaleTool:
         """Create and configure a ScaleTool instance.

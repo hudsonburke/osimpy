@@ -1,14 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import os
-from typing import Any, Generic, TypeVar, cast
+from typing import Generic, TypeVar, cast
 from pydantic import (
     BaseModel,
     Field,
     FilePath,
     DirectoryPath,
 )
-
+import polars as pl
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,19 @@ class ToolResult(BaseModel):
 
     setup_file: FilePath = Field(description="Path to the tool setup XML file")
 
+    @property
+    def duration(self) -> timedelta:
+        """Duration of the tool execution."""
+        return self.end_time - self.start_time
+
+    def _load_sto(self, path: FilePath | None) -> pl.DataFrame:
+        if path is None:
+            raise FileNotFoundError("Output file not available (tool may have failed)")
+        from ..io import sto_to_df
+
+        df, meta = sto_to_df(str(path))
+        return df
+
 
 ResultT = TypeVar("ResultT", bound=ToolResult)
 
@@ -78,15 +91,13 @@ class ToolSettings(BaseModel, Generic[ResultT]):
         description="Directory for results and setup files"
     )
     output_setup_file: str | None = Field(
-        description="Name for the output setup XML file (default: <name>_<tool_name>_setup.xml)"
+        None,
+        description="Name for the output setup XML file (default: <name>_<tool_name>_setup.xml)",
     )
 
     @property
     def tool_name(self) -> str:
         return self.__class__.__name__.replace("Settings", "")
-
-    def get_relative_path(self, p: Path) -> str:
-        return os.path.relpath(p.resolve(), self.results_directory)
 
     def create_tool(self):
         """Create and configure the OpenSim tool instance.
@@ -95,13 +106,32 @@ class ToolSettings(BaseModel, Generic[ResultT]):
         """
         raise NotImplementedError("Subclasses must implement create_tool()")
 
-    def get_result_kwargs(self) -> dict[str, Any]:
-        """Return subclass-specific result fields."""
-        return {}
+    def get_relative_path(self, p: Path) -> str:
+        return os.path.relpath(p.resolve(), self.results_directory)
 
-    def get_result_type(self) -> type[ResultT]:
-        """Return the result model class for this tool."""
-        return cast(type[ResultT], ToolResult)
+    @classmethod
+    def _infer_result_type(cls) -> type[ToolResult]:
+        for c in cls.__mro__:
+            meta = getattr(c, "__pydantic_generic_metadata__", None)
+            if meta and meta.get("args"):
+                result_cls = meta["args"][0]
+                if isinstance(result_cls, type) and issubclass(result_cls, ToolResult):
+                    return result_cls
+        return ToolResult  # Fallback if not found
+
+    def _resolve_output(self, filename: str) -> Path | None:
+        """Resolve an output file path to an absolute path, returning None if the file doesn't exist."""
+        path = Path(self.results_directory) / filename
+        return path.resolve() if path.exists() else None
+
+    def resolve_output_files(self) -> dict[str, Path | None]:
+        """
+        Return subclass-specific output file paths, resolved to absolute paths.
+
+        Subclasses override this to map result field names to their output files.
+        Returns None for files that don't exist (e.g., on failure).
+        """
+        return {}
 
     def build_result(
         self,
@@ -116,7 +146,7 @@ class ToolSettings(BaseModel, Generic[ResultT]):
         """Build the configured result model for this tool."""
         return cast(
             ResultT,
-            self.get_result_type()(
+            self._infer_result_type()(
                 success=success,
                 results_directory=Path(self.results_directory),
                 start_time=start_time,
@@ -124,7 +154,7 @@ class ToolSettings(BaseModel, Generic[ResultT]):
                 warnings=warnings,
                 errors=errors,
                 setup_file=Path(setup_file),
-                **self.get_result_kwargs(),
+                **self.resolve_output_files(),
             ),
         )
 

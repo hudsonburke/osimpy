@@ -2,6 +2,8 @@ import opensim as osim
 from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
 import logging
+import polars as pl
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +17,13 @@ class IKResult(ToolResult):
         Path to the output motion (.mot) file containing computed coordinates
     """
 
-    motion_file: FilePath = Field(description="Name of output motion file (.mot)")
+    motion_file: FilePath | None = Field(
+        None, description="Name of output motion file (.mot)"
+    )
+
+    def load_motion(self) -> pl.DataFrame:
+        """Load the output motion file as a DataFrame."""
+        return self._load_sto(self.motion_file)
 
 
 class IKSettings(ToolSettings[IKResult]):
@@ -48,11 +56,8 @@ class IKSettings(ToolSettings[IKResult]):
         description="Report marker locations in output (None = use template default)",
     )
 
-    def get_result_type(self) -> type[IKResult]:
-        return IKResult
-
-    def get_result_kwargs(self) -> dict[str, str]:
-        return {"motion_file": self.output_motion_file}
+    def resolve_output_files(self) -> dict[str, Path | None]:
+        return {"motion_file": self._resolve_output(self.output_motion_file)}
 
     def create_tool(self) -> osim.InverseKinematicsTool:
         """Create and configure an InverseKinematicsTool instance.

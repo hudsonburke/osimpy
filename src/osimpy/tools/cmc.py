@@ -12,6 +12,7 @@ import glob
 import logging
 from pathlib import Path
 from typing import Literal
+import polars as pl
 
 import opensim as osim
 from pydantic import Field, FilePath
@@ -24,9 +25,23 @@ logger = logging.getLogger(__name__)
 class CMCResult(ToolResult):
     """Result from Computed Muscle Control analysis."""
 
-    controls_file: FilePath = Field(description="Path to output controls file")
-    forces_file: FilePath = Field(description="Path to output forces file")
-    states_file: FilePath = Field(description="Path to output states file")
+    controls_file: FilePath | None = Field(
+        None, description="Path to output controls file"
+    )
+    forces_file: FilePath | None = Field(None, description="Path to output forces file")
+    states_file: FilePath | None = Field(None, description="Path to output states file")
+
+    def load_controls(self) -> pl.DataFrame:
+        """Load the output controls file as a DataFrame."""
+        return self._load_sto(self.controls_file)
+
+    def load_forces(self) -> pl.DataFrame:
+        """Load the output forces file as a DataFrame."""
+        return self._load_sto(self.forces_file)
+
+    def load_states(self) -> pl.DataFrame:
+        """Load the output states file as a DataFrame."""
+        return self._load_sto(self.states_file)
 
 
 class CMCSettings(ToolSettings[CMCResult]):
@@ -132,24 +147,21 @@ class CMCSettings(ToolSettings[CMCResult]):
     )
     output_precision: int = Field(8, description="Output precision")
 
-    def get_result_type(self) -> type[CMCResult]:
-        return CMCResult
-
-    def get_result_kwargs(self) -> dict[str, Path]:
+    # TODO: Figure out if there is a more exact pattern
+    def resolve_output_files(self) -> dict[str, Path | None]:
         results_dir = Path(self.results_directory)
-        controls_files = sorted(glob.glob(str(results_dir / "*_controls.sto")))
-        forces_files = sorted(glob.glob(str(results_dir / "*Actuation_force*.sto")))
-        if not forces_files:
-            forces_files = sorted(glob.glob(str(results_dir / "*force*.sto")))
-        states_files = sorted(glob.glob(str(results_dir / "*_states.sto")))
 
-        if not controls_files:
-            controls_files = sorted(glob.glob(str(results_dir / "*_controls.xml")))
+        def _first_match(*patterns: str) -> Path | None:
+            for pattern in patterns:
+                matches = sorted(results_dir.glob(pattern))
+                if matches:
+                    return matches[0]
+            return None
 
         return {
-            "controls_file": Path(controls_files[0]),
-            "forces_file": Path(forces_files[0]),
-            "states_file": Path(states_files[0]),
+            "controls_file": _first_match("*_controls.sto", "*_controls.xml"),
+            "forces_file": _first_match("*Actuation_force*.sto", "*force*.sto"),
+            "states_file": _first_match("*_states.sto"),
         }
 
     def create_tool(self) -> osim.CMCTool:

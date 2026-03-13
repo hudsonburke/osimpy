@@ -1,4 +1,5 @@
 import opensim as osim
+import polars as pl
 from pathlib import Path
 from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
@@ -10,7 +11,13 @@ logger = logging.getLogger(__name__)
 class IDResult(ToolResult):
     """Result from Inverse Dynamics analysis."""
 
-    forces_file: FilePath = Field(description="Path to output forces file (.sto)")
+    moments_file: FilePath | None = Field(
+        None, description="Path to output moments file (.sto)"
+    )
+
+    def load_moments(self) -> pl.DataFrame:
+        """Load the output moments file as a DataFrame."""
+        return self._load_sto(self.moments_file)
 
 
 class IDSettings(ToolSettings[IDResult]):
@@ -41,11 +48,8 @@ class IDSettings(ToolSettings[IDResult]):
         default_factory=list, description="List of force names to exclude from analysis"
     )
 
-    def get_result_type(self) -> type[IDResult]:
-        return IDResult
-
-    def get_result_kwargs(self) -> dict[str, Path]:
-        return {"forces_file": Path(self.output_forces_file)}
+    def resolve_output_files(self) -> dict[str, Path | None]:
+        return {"moments_file": self._resolve_output(self.output_forces_file)}
 
     def create_tool(self) -> osim.InverseDynamicsTool:
         """Create and configure an InverseDynamicsTool instance.
