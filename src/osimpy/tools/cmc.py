@@ -156,67 +156,75 @@ class CMCSettings(ToolSettings[CMCResult]):
         """Build a fully configured ``osim.CMCTool``."""
 
         if self.setup_path is not None:
-            tool = osim.CMCTool(str(self.setup_path.resolve()))
+            tool = osim.CMCTool(self.setup_path.resolve())
         else:
             tool = osim.CMCTool()
 
-        rel_model_path = str(self.get_relative_path(self.model_path))
-        rel_results_dir = str(self.get_relative_path(self.results_directory))
+        rel_model_path = self.get_relative_path(self.model_path)
+        rel_results_dir = self.get_relative_path(self.results_directory)
 
         tool.setModelFilename(rel_model_path)
 
         tool.setResultsDir(rel_results_dir)
 
-        if self.initial_time is None or self.final_time is None:
+        initial_time = self.initial_time
+        final_time = self.final_time
+        if initial_time is None or final_time is None:
             try:
                 if self.desired_kinematics_path is not None:
-                    sto = osim.Storage(str(self.desired_kinematics_path.resolve()))
-                    self.initial_time = self.initial_time or sto.getFirstTime()
-                    self.final_time = self.final_time or sto.getLastTime()
+                    sto = osim.Storage(self.desired_kinematics_path.resolve())
+                    if initial_time is None:
+                        initial_time = sto.getFirstTime()
+                    if final_time is None:
+                        final_time = sto.getLastTime()
                 elif self.desired_points_path is not None:
                     trc = osim.MarkerData(str(self.desired_points_path.resolve()))
-                    self.initial_time = self.initial_time or trc.getStartFrameTime()
-                    self.final_time = self.final_time or trc.getLastFrameTime()
+                    if initial_time is None:
+                        initial_time = trc.getStartFrameTime()
+                    if final_time is None:
+                        final_time = trc.getLastFrameTime()
+                else:
+                    # TODO: This could be validated on construction instead of at runtime
+                    raise ValueError(
+                        "Missing desired kinematics or points file to set missing time range"
+                    )
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load data to set the time range: {e}"
                 ) from e
 
-        tool.setInitialTime(self.initial_time)
-        tool.setFinalTime(self.final_time)
+        tool.setInitialTime(initial_time)
+        tool.setFinalTime(final_time)
         tool.setOutputPrecision(self.output_precision)
 
         tool.setReplaceForceSet(self.replace_force_set)
         if self.force_set_paths:
             arr = osim.ArrayStr()
             for fp in self.force_set_paths:
-                arr.append(str(self.get_relative_path(fp)))
+                arr.append(self.get_relative_path(fp))
             tool.setForceSetFiles(arr)
 
         if self.external_loads_path:
-            rel_external_loads_path = str(
-                self.get_relative_path(self.external_loads_path)
-            )
+            rel_external_loads_path = self.get_relative_path(self.external_loads_path)
             tool.setExternalLoadsFileName(rel_external_loads_path)
 
         if self.desired_points_path:
-            rel_desired_points_path = str(
-                self.get_relative_path(self.desired_points_path)
-            )
+            rel_desired_points_path = self.get_relative_path(self.desired_points_path)
             tool.setDesiredPointsFileName(rel_desired_points_path)
         if self.desired_kinematics_path:
-            rel_desired_kinematics_path = str(
-                self.get_relative_path(self.desired_kinematics_path)
+            rel_desired_kinematics_path = self.get_relative_path(
+                self.desired_kinematics_path
             )
+
             tool.setDesiredKinematicsFileName(rel_desired_kinematics_path)
         if self.task_set_path:
-            rel_task_set_path = str(self.get_relative_path(self.task_set_path))
+            rel_task_set_path = self.get_relative_path(self.task_set_path)
             tool.setTaskSetFileName(rel_task_set_path)
         if self.constraints_path:
-            rel_constraints_path = str(self.get_relative_path(self.constraints_path))
+            rel_constraints_path = self.get_relative_path(self.constraints_path)
             tool.setConstraintsFileName(rel_constraints_path)
         if self.rra_controls_path:
-            rel_rra_controls_path = str(self.get_relative_path(self.rra_controls_path))
+            rel_rra_controls_path = self.get_relative_path(self.rra_controls_path)
             tool.setRRAControlsFileName(rel_rra_controls_path)
 
         # CMC parameters
@@ -244,6 +252,9 @@ class CMCSettings(ToolSettings[CMCResult]):
 
         p = tool.updPropertyByName("optimizer_print_level")
         osim.PropertyHelper.setValueInt(self.optimizer_print_level, p)
+
+        p = tool.updPropertyByName("use_curvature_filter")
+        osim.PropertyHelper.setValueBool(self.use_curvature_filter, p)
 
         # Excluded actuators
         if self.actuators_to_exclude:

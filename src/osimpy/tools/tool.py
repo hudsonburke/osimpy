@@ -11,7 +11,6 @@ from pydantic import (
 
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -24,13 +23,9 @@ def validate_extension(file: str, extension: str) -> str:
 
 def validate_not_path(file: str) -> str:
     """Validate that the input is a filename, not a path."""
-    if os.path.sep in file or os.path.altsep and os.path.altsep in file:
+    if os.path.sep in file or (os.path.altsep and os.path.altsep in file):
         raise ValueError(f"Expected a filename, but got a path: {file}")
     return file
-
-
-# FilePathWithExtension = Annotated[str, AfterValidator()]
-# FileWithExtension = Annotated[str, AfterValidator(lambda f: validate_extension)]
 
 
 class ToolResult(BaseModel):
@@ -83,15 +78,15 @@ class ToolSettings(BaseModel, Generic[ResultT]):
         description="Directory for results and setup files"
     )
     output_setup_file: str | None = Field(
-        description="Name for the output setup XML file (default: <tool_name>_setup.xml)"
+        description="Name for the output setup XML file (default: <name>_<tool_name>_setup.xml)"
     )
 
     @property
     def tool_name(self) -> str:
         return self.__class__.__name__.replace("Settings", "")
 
-    def get_relative_path(self, p: Path):
-        return str(os.path.relpath(p.resolve(), self.results_directory))
+    def get_relative_path(self, p: Path) -> str:
+        return os.path.relpath(p.resolve(), self.results_directory)
 
     def create_tool(self):
         """Create and configure the OpenSim tool instance.
@@ -154,17 +149,17 @@ class ToolSettings(BaseModel, Generic[ResultT]):
 
         prev_dir = os.getcwd()
 
-        if self.output_setup_file is None:
-            self.output_setup_file = str(
+        output_setup_file = self.output_setup_file
+        if output_setup_file is None:
+            output_setup_file = str(
                 results_dir / f"{self.name}_{self.tool_name.lower()}_setup.xml"
             )
         try:
             # Create and configure tool, save setup XML
-            tool = self.create_tool()  # Returns OpenSim tool instance
-            tool.printToXML(
-                self.output_setup_file
-            )  # Save the setup XML for reproducibility
             os.chdir(str(results_dir))
+
+            tool = self.create_tool()  # Returns OpenSim tool instance
+            tool.printToXML(output_setup_file)  # Save the setup XML for reproducibility
             tool.run()
             success = True
         except Exception as e:
@@ -178,7 +173,7 @@ class ToolSettings(BaseModel, Generic[ResultT]):
 
         return self.build_result(
             success=success,
-            setup_file=self.output_setup_file,
+            setup_file=output_setup_file,
             start_time=start_time,
             end_time=end_time,
             warnings=warnings,

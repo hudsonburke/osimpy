@@ -4,7 +4,6 @@ from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +64,7 @@ class IDSettings(ToolSettings[IDResult]):
         else:
             tool = osim.InverseDynamicsTool()
 
-        rel_model_path = str(self.get_relative_path(self.model_path))
+        rel_model_path = self.get_relative_path(self.model_path)
 
         tool.setModelFileName(rel_model_path)
 
@@ -74,12 +73,10 @@ class IDSettings(ToolSettings[IDResult]):
 
         # Set external loads if provided
         if self.external_loads_path:
-            rel_external_loads_path = str(
-                self.get_relative_path(self.external_loads_path)
-            )
+            rel_external_loads_path = self.get_relative_path(self.external_loads_path)
             tool.setExternalLoadsFileName(rel_external_loads_path)
 
-        rel_coordinates_path = str(self.get_relative_path(self.coordinates_path))
+        rel_coordinates_path = self.get_relative_path(self.coordinates_path)
         tool.setCoordinatesFileName(rel_coordinates_path)
         tool.setOutputGenForceFileName(self.output_forces_file)
 
@@ -93,18 +90,21 @@ class IDSettings(ToolSettings[IDResult]):
             for force in self.excluded_forces:
                 exclude.append(force)
             tool.setExcludedForces(exclude)
-
-        if self.initial_time is None or self.final_time is None:
+        initial_time = self.initial_time
+        final_time = self.final_time
+        if initial_time is None or final_time is None:
             try:
                 sto = osim.Storage(str(self.coordinates_path.resolve()))
-                self.initial_time = self.initial_time or sto.getFirstTime()
-                self.final_time = self.final_time or sto.getLastTime()
+                if initial_time is None:
+                    initial_time = sto.getFirstTime()
+                if final_time is None:
+                    final_time = sto.getLastTime()
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load coordinate data from '{self.coordinates_path}': {e}"
                 ) from e
 
-        tool.setStartTime(self.initial_time)
-        tool.setEndTime(self.final_time)
+        tool.setStartTime(initial_time)
+        tool.setEndTime(final_time)
 
         return tool

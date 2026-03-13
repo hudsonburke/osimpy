@@ -3,7 +3,6 @@ from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -16,7 +15,7 @@ class IKResult(ToolResult):
         Path to the output motion (.mot) file containing computed coordinates
     """
 
-    motion_file: str = Field(description="Name of output motion file (.mot)")
+    motion_file: FilePath = Field(description="Name of output motion file (.mot)")
 
 
 class IKSettings(ToolSettings[IKResult]):
@@ -73,31 +72,35 @@ class IKSettings(ToolSettings[IKResult]):
         else:
             tool = osim.InverseKinematicsTool()
 
-        rel_model_path = str(self.get_relative_path(self.model_path))
-        rel_marker_path = str(self.get_relative_path(self.marker_path))
-        rel_results_dir = str(self.get_relative_path(self.results_directory))
+        rel_model_path = self.get_relative_path(self.model_path)
+        rel_marker_path = self.get_relative_path(self.marker_path)
+        rel_results_dir = self.get_relative_path(self.results_directory)
 
         tool.set_model_file(rel_model_path)
         tool.setResultsDir(rel_results_dir)
         tool.setMarkerDataFileName(rel_marker_path)
         tool.setOutputMotionFileName(self.output_motion_file)
 
-        if self.initial_time is None or self.final_time is None:
+        initial_time = self.initial_time
+        final_time = self.final_time
+        if initial_time is None or final_time is None:
             try:
-                trc_data = osim.MarkerData(str(self.marker_path.resolve()))
-                self.initial_time = self.initial_time or trc_data.getStartFrameTime()
-                self.final_time = self.final_time or trc_data.getLastFrameTime()
+                trc = osim.MarkerData(str(self.marker_path.resolve()))
+                if initial_time is None:
+                    initial_time = trc.getStartFrameTime()
+                if final_time is None:
+                    final_time = trc.getLastFrameTime()
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load marker data from '{self.marker_path}': {e}"
                 ) from e
 
-        tool.setStartTime(self.initial_time)
-        tool.setEndTime(self.final_time)
+        tool.setStartTime(initial_time)
+        tool.setEndTime(final_time)
 
         # Override task set only if explicitly provided
         if self.task_set_path is not None:
-            rel_task_set_path = str(self.get_relative_path(self.task_set_path))
+            rel_task_set_path = self.get_relative_path(self.task_set_path)
             tool.set_IKTaskSet(rel_task_set_path)
 
         # Override constraint weight only if explicitly provided

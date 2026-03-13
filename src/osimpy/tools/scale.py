@@ -3,7 +3,6 @@ from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -82,8 +81,8 @@ class ScaleSettings(ToolSettings[ScaleResult]):
 
         generic_model_maker: osim.GenericModelMaker = tool.getGenericModelMaker()
 
-        rel_model_path = str(self.get_relative_path(self.model_path))
-        rel_marker_path = str(self.get_relative_path(self.marker_path))
+        rel_model_path = self.get_relative_path(self.model_path)
+        rel_marker_path = self.get_relative_path(self.marker_path)
 
         generic_model_maker.setModelFileName(rel_model_path)
         if self.marker_set_path:
@@ -103,18 +102,22 @@ class ScaleSettings(ToolSettings[ScaleResult]):
             model_scaler.setOutputScaleFileName(self.output_scale_file)
 
         time_array = osim.ArrayDouble()
-        if self.initial_time is None or self.final_time is None:
+        initial_time = self.initial_time
+        final_time = self.final_time
+        if initial_time is None or final_time is None:
             try:
-                trc_data = osim.MarkerData(str(self.marker_path.resolve()))
-                self.initial_time = self.initial_time or trc_data.getStartFrameTime()
-                self.final_time = self.final_time or trc_data.getLastFrameTime()
+                trc = osim.MarkerData(str(self.marker_path.resolve()))
+                if initial_time is None:
+                    initial_time = trc.getStartFrameTime()
+                if final_time is None:
+                    final_time = trc.getLastFrameTime()
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load marker data from '{self.marker_path}': {e}"
                 ) from e
 
-        time_array.set(0, self.initial_time)
-        time_array.set(1, self.final_time)
+        time_array.set(0, initial_time)
+        time_array.set(1, final_time)
         model_scaler.setTimeRange(time_array)
 
         if self.scale_factors:
@@ -133,7 +136,7 @@ class ScaleSettings(ToolSettings[ScaleResult]):
                         )
                         break
                 if not found:
-                    logger.warning(
+                    logger.error(
                         f"No Scale object found for segment '{segment_name}' "
                         f"in ScaleSet — manual scale factors not applied."
                     )
