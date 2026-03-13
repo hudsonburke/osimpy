@@ -1,10 +1,11 @@
 from .read import sto_to_df
-from .write import export_trc, export_mot, export_external_loads, OpenSimExternalForce
+from .write import export_mot, export_external_loads, OpenSimExternalForce
+from .metadata import STOMetadata
 
 __all__ = [
-    'export_trc',
-    'export_mot',
-    'export_external_loads',
-    'OpenSimExternalForce',
-    'sto_to_df',
+    "export_mot",
+    "export_external_loads",
+    "OpenSimExternalForce",
+    "sto_to_df",
+    "STOMetadata",
 ]

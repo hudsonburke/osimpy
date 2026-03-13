@@ -2,9 +2,10 @@
 
 import polars as pl
 import polars.selectors as cs
+from .metadata import STOMetadata
 
 
-def sto_to_df(file_path: str) -> tuple[pl.DataFrame, dict[str, str]]:
+def sto_to_df(file_path: str) -> tuple[pl.DataFrame, STOMetadata]:
     """
     Reads a .sto or .mot file and returns a Polars DataFrame.
 
@@ -47,4 +48,5 @@ def sto_to_df(file_path: str) -> tuple[pl.DataFrame, dict[str, str]]:
     )
     # Strip whitespace from columns
     df = df.with_columns(cs.string().str.strip_chars().cast(pl.Float64, strict=False))
-    return df, file_metadata
+
+    return df, STOMetadata(**file_metadata)

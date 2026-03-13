@@ -10,6 +10,7 @@ from pydantic import (
 )
 import polars as pl
 import logging
+from ..io import STOMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +54,13 @@ class ToolResult(BaseModel):
         """Duration of the tool execution."""
         return self.end_time - self.start_time
 
-    def _load_sto(self, path: FilePath | None) -> pl.DataFrame:
+    def _load_sto(self, path: FilePath | None) -> tuple[pl.DataFrame, STOMetadata]:
         if path is None:
             raise FileNotFoundError("Output file not available (tool may have failed)")
         from ..io import sto_to_df
 
         df, meta = sto_to_df(str(path))
-        return df
+        return df, meta
 
 
 ResultT = TypeVar("ResultT", bound=ToolResult)

@@ -12,20 +12,22 @@ class BaseMetadata(BaseModel):
 class STOMetadata(BaseMetadata):
     """
     https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53089996/Storage+.sto+Files
+
+    Currently encapsulates MOTMetadaata as well since the formats are very similar
     """
 
     nRows: int
     nColumns: int
     inDegrees: Literal["yes", "no"] = "no"
 
-
-class MOTMetadata(STOMetadata):
-    """
-    https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53089415/Motion+.mot+Files
-    Currently this only implements option 2 from the documentation as the previous format is rarely used.
-    """
-
     comments: list[str] | None = None
+
+
+# class MOTMetadata(STOMetadata):
+#     """
+#     https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53089415/Motion+.mot+Files
+#     Currently this only implements option 2 from the documentation as the previous format is rarely used.
+#     """
 
 
 class TRCMetadata(BaseMetadata):
