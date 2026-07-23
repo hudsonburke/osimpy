@@ -1,8 +1,9 @@
 from .read import sto_to_df
-from .write import export_trc, export_mot, export_external_loads, OpenSimExternalForce
+from .write import write_trc, write_sto, export_mot, export_external_loads, OpenSimExternalForce
 
 __all__ = [
-    'export_trc',
+    'write_trc',
+    'write_sto',
     'export_mot',
     'export_external_loads',
     'OpenSimExternalForce',

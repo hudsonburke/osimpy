@@ -2,48 +2,38 @@
 
 ## Description
 
-This repository contains tools for working with OpenSim models and simulations in Python. It includes functionality for manipulating OpenSim models, setting up and running simulations, and analyzing results. It strives to be Pythonic and user-friendly, making it easier for researchers and developers to work with OpenSim data by providing type hints and descriptions for IDE support.
+Pythonic wrapper and tools for working with OpenSim models and analyses. Provides functionality for manipulating OpenSim models, setting up and running simulations, and analyzing results, with type hints and descriptions for IDE support.
 
 ## Quickstart
-
-### Installation
-
-If not already installed, install:
-
-- [git](https://git-scm.com/install/)
-- [conda](https://www.anaconda.com/docs/getting-started/miniconda/install)
-  - Miniconda is sufficient, but any anaconda installation will work
 
 ``` shell
 git clone https://github.com/hudsonburke/osimpy.git
 cd osimpy
 
-conda env create -f environment.yml
-conda activate osimpy
+# Install with uv (recommended)
+uv sync
 
-python -m pip install -e .
+# Or with pip
+pip install -e .
 ```
 
-### Usage
+## Modules
 
-## Contributing
+| Module | Description |
+|--------|-------------|
+| `io` | Read/write OpenSim file formats (.sto, .mot, .trc, external loads XML) |
+| `tools` | Pydantic-based wrappers for OpenSim tools (Scale, IK, ID, CMC) |
+| `osim_graph` | Graph-based muscle path analysis across joint configurations |
+| `moco` | MocoInverse solver wrapper |
+| `utils` | Unit conversion, actuator/task file helpers |
 
-### TODO
+## Development
 
-- [ ] Define metadata schemas for files
-- [ ] Clean up osim_graph
-- [ ] Implement other moco functionality
-- [ ] Create tests
-- [ ] OpenSim Python bindings using nanobind or pybind11
-  - Doing this would essentially supplant most of this repo's functionality
-- [ ] Switch to uv for dependency management
-  - Currently waiting for opensim bindings to be easily available
-  - Pyopensim doesn't quite work
-
-## Citing
-
-If you use osimpy in your research, please cite:
-
-```bibtex
-
+```shell
+uv sync --group dev
 ```
+
+## Notes
+
+- OpenSim 4.6 wheels are available for Python 3.11–3.13.
+- The `OsimGraph` module uses multiprocessing for muscle path analysis; set `OMP_NUM_THREADS=1` for deterministic behavior.

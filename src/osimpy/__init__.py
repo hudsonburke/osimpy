@@ -1,5 +1,6 @@
 from .io import (
-    export_trc,
+    write_trc,
+    write_sto,
     export_mot,
     export_external_loads,
     OpenSimExternalForce,
@@ -26,7 +27,8 @@ from .osim_graph import OsimGraph
 
 __all__ = [
     "OsimGraph",
-    "export_trc",
+    "write_trc",
+    "write_sto",
     "export_mot",
     "export_external_loads",
     "OpenSimExternalForce",

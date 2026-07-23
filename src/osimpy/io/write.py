@@ -17,23 +17,81 @@ logger = logging.getLogger(__name__)
 # TRC is very similar to TSV -> What can I leverage for this?
 # TODO: Version that bypasses the OpenSim API and writes the TRC file directly from the tensor, for faster export
 def write_trc(filepath: Path, data: np.ndarray, metadata: TRCMetadata) -> None:
-    with open(filepath) as f:
-        f.write(f"PathFileType\t{metadata.PathFileType}\t{metadata.FileName}\n")
+    """Write TRC file from marker data.
+
+    TODO: Implement direct TRC writer bypassing OpenSim API for speed.
+    Falls back to OpenSim's TRCFileAdapter for now.
+    """
+    _validate_trc_metadata(data, metadata)
+    _export_tensor_as_trc(filepath, data, metadata)
+
+
+def _validate_trc_metadata(data: np.ndarray, metadata: TRCMetadata) -> None:
+    """Validate that metadata matches data shape."""
+    if data.shape[0] != metadata.NumFrames:
+        raise ValueError(
+            f"NumFrames mismatch: metadata={metadata.NumFrames}, data={data.shape[0]}"
+        )
+    if data.shape[1] != metadata.NumMarkers:
+        raise ValueError(
+            f"NumMarkers mismatch: metadata={metadata.NumMarkers}, data={data.shape[1]}"
+        )
+
+
+def _export_tensor_as_trc(
+    filepath: Path, data: np.ndarray, metadata: TRCMetadata
+) -> None:
+    """Export marker data to TRC via OpenSim's TRCFileAdapter."""
+    num_frames, num_markers, dims = data.shape
+    if dims != 3:
+        raise ValueError(f"Expected 3D coordinates, got shape {data.shape}")
+
+    time = np.arange(num_frames) / metadata.DataRate
+
+    table = osim.TimeSeriesTableVec3()
+    table.setColumnLabels(metadata.MarkerNames)
+    table.addTableMetaDataString("Units", metadata.Units)
+    table.addTableMetaDataString("DataRate", str(metadata.DataRate))
+
+    for i in range(num_frames):
+        row = [osim.Vec3(*coords) for coords in data[i]]
+        table.appendRow(time[i], osim.RowVectorVec3(row))
+
+    adapter = osim.TRCFileAdapter()
+    adapter.write(table, str(filepath))
 
 
 def write_sto(
     filepath: Path, data: np.ndarray, metadata: STOMetadata | MOTMetadata
 ) -> None:
-    with open(filepath) as f:
-        # for field_name, field_value in metadata.model_dump().items():
-        #     f.write(f"{field_name}\t{field_value}\n")
-        f.write(f"nRows\t{metadata.nRows}\n")
-        f.write(f"nColumns\t{metadata.nColumns}\n")
-        f.write(f"inDegrees\t{metadata.inDegrees}\n")
-        # TODO
-        # if "comments" in metadata.dict():
-        #     f.write("\n".join(f"{comment}" for comment in metadata["comments"]) + "\n")
-        # Write column labels
+    """Write data to OpenSim .sto storage file format.
+
+    Uses OpenSim's STOFileAdapter for reliable format compatibility.
+    """
+    num_rows, num_cols = data.shape
+    if metadata.nRows != num_rows:
+        logger.warning(
+            f"metadata.nRows ({metadata.nRows}) != data rows ({num_rows})"
+        )
+    if metadata.nColumns != num_cols:
+        logger.warning(
+            f"metadata.nColumns ({metadata.nColumns}) != data cols ({num_cols})"
+        )
+
+    labels = [f"col{i}" for i in range(num_cols)]
+
+    table = osim.TimeSeriesTable()
+    table.setColumnLabels(labels)
+    table.addTableMetaDataString("nRows", str(num_rows))
+    table.addTableMetaDataString("nColumns", str(num_cols))
+    table.addTableMetaDataString("inDegrees", metadata.inDegrees)
+
+    time = np.arange(num_rows, dtype=float)
+    for i in range(num_rows):
+        table.appendRow(time[i], osim.RowVector(data[i].tolist()))
+
+    adapter = osim.STOFileAdapter()
+    adapter.write(table, str(filepath))
 
 
 def export_tensor_as_trc(
