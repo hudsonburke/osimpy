@@ -6,3 +6,4 @@ wheels/
 *.egg-info
 __pycache__/
 .vscode/
+uv.lock
