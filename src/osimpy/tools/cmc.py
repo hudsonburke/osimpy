@@ -15,7 +15,7 @@ import polars as pl
 
 import opensim as osim
 from pydantic import Field, FilePath
-from ..io.metadata import STOMetadata
+from ..io import STOMetadata
 from .tool import ToolResult, ToolSettings
 
 logger = logging.getLogger(__name__)

@@ -79,6 +79,12 @@ class ScaleSettings(ToolSettings[ScaleResult]):
         else:
             tool = osim.ScaleTool()
 
+        # Reset PathToSubject so relative paths resolve from CWD
+        # (run() sets CWD to results_directory before calling create_tool).
+        # Without this, OpenSim resolves relative paths from the template
+        # XML's directory, not from the results directory.
+        tool.setPathToSubject("")
+
         generic_model_maker: osim.GenericModelMaker = tool.getGenericModelMaker()
 
         rel_model_path = self.get_relative_path(self.model_path)
@@ -146,5 +152,7 @@ class ScaleSettings(ToolSettings[ScaleResult]):
             marker_placer.setMarkerFileName(rel_marker_path)
             marker_placer.setOutputModelFileName(self.output_model_file)
             marker_placer.setTimeRange(time_array)
+        else:
+            tool.getMarkerPlacer().setApply(False)
 
         return tool

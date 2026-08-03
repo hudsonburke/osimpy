@@ -1,13 +1,15 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 import os
-from typing import Generic, TypeVar, cast
+from typing import Callable, Generic, TypeVar, cast
 from pydantic import (
     BaseModel,
     Field,
     FilePath,
     DirectoryPath,
+    PrivateAttr,
 )
+from pydantic_settings import CliApp
 import polars as pl
 import logging
 from ..io import STOMetadata
@@ -95,6 +97,8 @@ class ToolSettings(BaseModel, Generic[ResultT]):
         None,
         description="Name for the output setup XML file (default: <name>_<tool_name>_setup.xml)",
     )
+
+    _cli_result: ToolResult | None = PrivateAttr(default=None)
 
     @property
     def tool_name(self) -> str:
@@ -210,3 +214,21 @@ class ToolSettings(BaseModel, Generic[ResultT]):
             warnings=warnings,
             errors=errors,
         )
+
+    def cli_cmd(self) -> None:
+        result = cast(ToolResult, self.run())
+        object.__setattr__(self, "_cli_result", result)
+        print(result.model_dump_json(indent=2, exclude_none=True))
+
+    @classmethod
+    def make_cli(cls) -> Callable[[list[str] | None], ResultT]:
+        def main(argv: list[str] | None = None) -> ResultT:
+            settings = CliApp.run(cls, cli_args=argv)
+            result = settings._cli_result
+            if result is None:
+                raise RuntimeError(
+                    f"CLI command for {cls.__name__} did not produce a result"
+                )
+            return cast(ResultT, result)
+
+        return main

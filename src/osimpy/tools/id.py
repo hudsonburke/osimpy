@@ -4,7 +4,7 @@ from pathlib import Path
 from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
 import logging
-from ..io.metadata import STOMetadata
+from ..io import STOMetadata
 
 logger = logging.getLogger(__name__)
 

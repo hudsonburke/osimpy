@@ -4,7 +4,7 @@ from .tool import ToolSettings, ToolResult
 import logging
 import polars as pl
 from pathlib import Path
-from ..io.metadata import STOMetadata
+from ..io import STOMetadata
 
 logger = logging.getLogger(__name__)
 

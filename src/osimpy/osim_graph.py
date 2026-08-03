@@ -8,11 +8,11 @@ import math
 import logging
 import polars as pl
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Type variable for OpenSim component types
 T = TypeVar("T")
+
 
 def _process_coord_set_parallel(
     model_path: str,
