@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import Field, FilePath
 from .tool import ToolSettings, ToolResult
 import logging
+from ..io import STOMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ class IDResult(ToolResult):
         None, description="Path to output moments file (.sto)"
     )
 
-    def load_moments(self) -> pl.DataFrame:
+    def load_moments(self) -> tuple[pl.DataFrame, STOMetadata]:
         """Load the output moments file as a DataFrame."""
         return self._load_sto(self.moments_file)
 

@@ -4,6 +4,7 @@ from .tool import ToolSettings, ToolResult
 import logging
 import polars as pl
 from pathlib import Path
+from ..io import STOMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class IKResult(ToolResult):
         None, description="Name of output motion file (.mot)"
     )
 
-    def load_motion(self) -> pl.DataFrame:
+    def load_motion(self) -> tuple[pl.DataFrame, STOMetadata]:
         """Load the output motion file as a DataFrame."""
         return self._load_sto(self.motion_file)
 

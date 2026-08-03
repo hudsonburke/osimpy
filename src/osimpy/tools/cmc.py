@@ -8,7 +8,6 @@ Provides a Pydantic-based settings model that can:
 
 from __future__ import annotations
 
-import glob
 import logging
 from pathlib import Path
 from typing import Literal
@@ -16,7 +15,7 @@ import polars as pl
 
 import opensim as osim
 from pydantic import Field, FilePath
-
+from ..io import STOMetadata
 from .tool import ToolResult, ToolSettings
 
 logger = logging.getLogger(__name__)
@@ -31,15 +30,15 @@ class CMCResult(ToolResult):
     forces_file: FilePath | None = Field(None, description="Path to output forces file")
     states_file: FilePath | None = Field(None, description="Path to output states file")
 
-    def load_controls(self) -> pl.DataFrame:
+    def load_controls(self) -> tuple[pl.DataFrame, STOMetadata]:
         """Load the output controls file as a DataFrame."""
         return self._load_sto(self.controls_file)
 
-    def load_forces(self) -> pl.DataFrame:
+    def load_forces(self) -> tuple[pl.DataFrame, STOMetadata]:
         """Load the output forces file as a DataFrame."""
         return self._load_sto(self.forces_file)
 
-    def load_states(self) -> pl.DataFrame:
+    def load_states(self) -> tuple[pl.DataFrame, STOMetadata]:
         """Load the output states file as a DataFrame."""
         return self._load_sto(self.states_file)
 

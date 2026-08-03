@@ -1,14 +1,13 @@
 [project]
 name = "osimpy"
 version = "0.1.0"
-description = "Pythonic wrapper and tools for working with OpenSim models and analyses"
+description = "Pythonic wrapper and tools for working with OpenSim models and simulations"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy",
-    "opensim>=4.6",
+    "pydantic-settings>=2.0",
     "polars",
-    "pydantic>=2",
+    "opensim>=4.6",
 ]
 
 [project.optional-dependencies]
